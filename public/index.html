@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestion Pastas Caseras</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>🍝 Pastas Caseras</h1>
+      <nav id="nav">
+        <div class="nav-group">Panel</div>
+        <a href="#/dashboard" data-route="dashboard">Dashboard</a>
+        <div class="nav-group">Operaciones</div>
+        <a href="#/produccion" data-route="produccion">Produccion</a>
+        <a href="#/ventas" data-route="ventas">Ventas</a>
+        <a href="#/inventario" data-route="inventario">Movimientos de Insumos</a>
+        <div class="nav-group">Catalogo</div>
+        <a href="#/productos" data-route="productos">Productos</a>
+        <a href="#/costeo" data-route="costeo">Costeo Estandar</a>
+        <a href="#/recetas" data-route="recetas">Recetas (BOM)</a>
+        <a href="#/insumos" data-route="insumos">Insumos</a>
+        <a href="#/proveedores" data-route="proveedores">Proveedores</a>
+        <a href="#/clientes" data-route="clientes">Clientes</a>
+        <div class="nav-group">Finanzas</div>
+        <a href="#/gastos" data-route="gastos">Gastos Fijos</a>
+      </nav>
+    </aside>
+    <main id="app" class="content"></main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
