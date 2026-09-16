@@ -7,6 +7,11 @@ import {
   stockProductoTerminado,
   registrarProduccion,
   registrarVenta,
+  registrarTicket,
+  ticketNumero,
+  saldoCliente,
+  listaDeudores,
+  registrarPago,
   resultadoMensual,
   alertasStock,
 } from '../costeo.js';
@@ -14,14 +19,14 @@ import {
 export const api = Router();
 
 // --- Proveedores (CRUD simple) ---
-api.use('/proveedores', crudRouter('proveedores', ['nombre', 'contacto', 'condicion_pago'], { orderBy: 'nombre' }));
+api.use('/proveedores', crudRouter('proveedores', ['codigo', 'nombre', 'insumos_que_provee', 'contacto', 'condicion_pago'], { orderBy: 'nombre' }));
 
-// --- Clientes (CRUD simple + total comprado calculado) ---
-const clientesBase = crudRouter('clientes', ['nombre', 'tipo', 'contacto'], { orderBy: 'nombre' });
+// --- Clientes (CRUD simple + total comprado y saldo cuenta corriente calculados) ---
+const clientesBase = crudRouter('clientes', ['codigo', 'nombre', 'tipo', 'contacto', 'zona'], { orderBy: 'nombre' });
 api.get('/clientes', (req, res) => {
   const clientes = db.prepare('SELECT * FROM clientes ORDER BY nombre').all();
   const totalStmt = db.prepare('SELECT COALESCE(SUM(subtotal), 0) AS total FROM ventas WHERE cliente_id = ?');
-  res.json(clientes.map((c) => ({ ...c, totalComprado: totalStmt.get(c.id).total })));
+  res.json(clientes.map((c) => ({ ...c, totalComprado: totalStmt.get(c.id).total, saldoCuentaCorriente: saldoCliente(c.id) })));
 });
 api.use('/clientes', clientesBase);
 
@@ -29,7 +34,7 @@ api.use('/clientes', clientesBase);
 api.use('/gastos-fijos', crudRouter('gastos_fijos', ['anio', 'mes', 'concepto', 'monto'], { orderBy: 'anio DESC, mes DESC' }));
 
 // --- Insumos (con stock actual calculado) ---
-const insumosFields = ['nombre', 'unidad', 'costo_unitario', 'proveedor_id', 'stock_minimo'];
+const insumosFields = ['codigo', 'nombre', 'unidad', 'costo_unitario', 'proveedor_id', 'stock_minimo'];
 api.get('/insumos', (req, res) => {
   const insumos = db
     .prepare(
@@ -52,12 +57,13 @@ api.get('/insumos/:id', (req, res) => {
 api.use('/insumos', crudRouter('insumos', insumosFields, { orderBy: 'nombre' }));
 
 // --- Productos (con costo unitario, margen y stock calculados) ---
-const productosFields = ['nombre', 'categoria', 'precio_venta', 'stock_inicial', 'stock_minimo', 'activo'];
+const productosFields = ['codigo', 'nombre', 'categoria', 'unidad_venta', 'precio_venta', 'stock_inicial', 'stock_minimo', 'activo'];
 function serializeProducto(p) {
   const { costoUnitario, origen } = costoUnitarioProducto(p.id);
   const stockActual = stockProductoTerminado(p.id);
   return {
     ...p,
+    nombreCompleto: p.categoria ? `${p.categoria} - ${p.nombre}` : p.nombre,
     costoUnitario,
     origenCosteo: origen,
     margen: p.precio_venta - costoUnitario,
@@ -191,6 +197,78 @@ api.post('/ventas', (req, res) => {
   }
 });
 
+// --- Tickets (comprobante interno "Ticket X", agrupa 1 o mas lineas de venta) ---
+api.get('/tickets', (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT t.*, c.nombre AS cliente_nombre,
+         (SELECT COUNT(*) FROM ventas v WHERE v.ticket_id = t.id) AS items
+       FROM tickets t LEFT JOIN clientes c ON c.id = t.cliente_id
+       ORDER BY t.fecha DESC, t.id DESC`
+    )
+    .all();
+  res.json(rows.map((r) => ({ ...r, numero: ticketNumero(r.id) })));
+});
+api.get('/tickets/:id', (req, res) => {
+  const ticket = db
+    .prepare(
+      `SELECT t.*, c.nombre AS cliente_nombre FROM tickets t
+       LEFT JOIN clientes c ON c.id = t.cliente_id WHERE t.id = ?`
+    )
+    .get(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'No encontrado' });
+  const items = db
+    .prepare(
+      `SELECT v.*, p.nombre AS producto_nombre FROM ventas v
+       JOIN productos p ON p.id = v.producto_id WHERE v.ticket_id = ? ORDER BY v.id`
+    )
+    .all(req.params.id);
+  res.json({ ...ticket, numero: ticketNumero(ticket.id), items });
+});
+api.post('/tickets', (req, res) => {
+  try {
+    const { clienteId, cliente_id, tipoPago, tipo_pago, formaPago, forma_pago, items, fecha } = req.body;
+    const result = registrarTicket({
+      clienteId: clienteId ?? cliente_id ?? null,
+      tipoPago: tipoPago ?? tipo_pago,
+      formaPago: formaPago ?? forma_pago,
+      items: (items || []).map((it) => ({
+        productoId: it.productoId ?? it.producto_id,
+        cantidad: it.cantidad,
+        precioUnitario: it.precioUnitario ?? it.precio_unitario,
+      })),
+      fecha,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// --- Deudores / Cuenta corriente ---
+api.get('/deudores', (req, res) => {
+  res.json(listaDeudores());
+});
+api.get('/deudores/:clienteId/movimientos', (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT m.*, t.id AS ticket_ref FROM cuenta_corriente_movimientos m
+       LEFT JOIN tickets t ON t.id = m.ticket_id
+       WHERE m.cliente_id = ? ORDER BY m.fecha DESC, m.id DESC`
+    )
+    .all(req.params.clienteId);
+  res.json({ movimientos: rows, saldo: saldoCliente(req.params.clienteId) });
+});
+api.post('/deudores/pagos', (req, res) => {
+  try {
+    const { clienteId, cliente_id, monto, fecha, referencia } = req.body;
+    const result = registrarPago({ clienteId: clienteId ?? cliente_id, monto: Number(monto), fecha, referencia });
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // --- Inventario_Insumos (movimientos: compras, ajustes, mermas manuales) ---
 api.get('/inventario-insumos', (req, res) => {
   const where = req.query.insumo_id ? 'WHERE m.insumo_id = ?' : '';
@@ -246,6 +324,8 @@ const EXPORTABLE = {
   produccion: 'SELECT * FROM produccion',
   inventario_insumos: 'SELECT * FROM inventario_insumos',
   gastos_fijos: 'SELECT * FROM gastos_fijos',
+  tickets: 'SELECT * FROM tickets',
+  cuenta_corriente_movimientos: 'SELECT * FROM cuenta_corriente_movimientos',
 };
 function toCsv(rows) {
   if (rows.length === 0) return '';

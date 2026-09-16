@@ -105,8 +105,8 @@ export function registrarProduccion({ productoId, cantidad, fecha }) {
   return { id: produccionId, costoUnitario, costoTotal, origen };
 }
 
-/** Registra una venta calculando subtotal, costo (vigente) y margen. */
-export function registrarVenta({ clienteId, productoId, cantidad, precioUnitario, formaPago, fecha }) {
+/** Registra una linea de venta calculando subtotal, costo (vigente) y margen. */
+export function registrarVenta({ clienteId, productoId, cantidad, precioUnitario, formaPago, fecha, ticketId }) {
   if (!(cantidad > 0)) throw new Error('La cantidad vendida debe ser mayor a 0');
 
   const producto = db.prepare('SELECT precio_venta FROM productos WHERE id = ?').get(productoId);
@@ -121,12 +121,114 @@ export function registrarVenta({ clienteId, productoId, cantidad, precioUnitario
 
   const info = db
     .prepare(
-      `INSERT INTO ventas (fecha, cliente_id, producto_id, cantidad, precio_unitario, forma_pago, subtotal, costo_unitario, costo_total, margen)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ventas (ticket_id, fecha, cliente_id, producto_id, cantidad, precio_unitario, forma_pago, subtotal, costo_unitario, costo_total, margen)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(fechaVenta, clienteId ?? null, productoId, cantidad, precio, formaPago ?? null, subtotal, costoUnitario, costoTotal, margen);
+    .run(ticketId ?? null, fechaVenta, clienteId ?? null, productoId, cantidad, precio, formaPago ?? null, subtotal, costoUnitario, costoTotal, margen);
 
   return { id: Number(info.lastInsertRowid), subtotal, costoUnitario, costoTotal, margen };
+}
+
+/**
+ * Registra un ticket de venta (comprobante interno, "Ticket X" -- no reemplaza
+ * a una factura) con una o varias lineas de producto/cantidad.
+ * tipoPago: 'contado' (pago inmediato) o 'cuenta_corriente' (pago diferido).
+ * Si es a cuenta corriente, genera automaticamente un cargo en el modulo
+ * Deudores para el cliente por el total del ticket.
+ */
+export function registrarTicket({ clienteId, tipoPago, formaPago, items, fecha }) {
+  if (!Array.isArray(items) || items.length === 0) throw new Error('El ticket debe tener al menos un producto');
+  if (!['contado', 'cuenta_corriente'].includes(tipoPago)) throw new Error('Tipo de pago invalido');
+  if (tipoPago === 'cuenta_corriente' && !clienteId) {
+    throw new Error('Para pago diferido (cuenta corriente) hay que seleccionar un cliente');
+  }
+  const itemsValidos = items.filter((it) => Number(it.cantidad) > 0);
+  if (itemsValidos.length === 0) throw new Error('Cargar la cantidad de al menos un producto');
+
+  const fechaTicket = fecha || new Date().toISOString().slice(0, 10);
+
+  let ticketId;
+  let total = 0;
+  const lineas = [];
+  db.exec('BEGIN');
+  try {
+    const info = db
+      .prepare('INSERT INTO tickets (fecha, cliente_id, tipo_pago, forma_pago, total) VALUES (?, ?, ?, ?, 0)')
+      .run(fechaTicket, clienteId ?? null, tipoPago, tipoPago === 'contado' ? formaPago ?? null : null);
+    ticketId = Number(info.lastInsertRowid);
+
+    for (const item of itemsValidos) {
+      const venta = registrarVenta({
+        clienteId,
+        productoId: item.productoId,
+        cantidad: Number(item.cantidad),
+        precioUnitario: item.precioUnitario,
+        formaPago: tipoPago === 'contado' ? formaPago : 'Cuenta corriente',
+        fecha: fechaTicket,
+        ticketId,
+      });
+      total += venta.subtotal;
+      lineas.push({ productoId: item.productoId, cantidad: Number(item.cantidad), ...venta });
+    }
+
+    db.prepare('UPDATE tickets SET total = ? WHERE id = ?').run(total, ticketId);
+
+    if (tipoPago === 'cuenta_corriente') {
+      db.prepare(
+        `INSERT INTO cuenta_corriente_movimientos (fecha, cliente_id, tipo, monto, referencia, ticket_id)
+         VALUES (?, ?, 'cargo', ?, ?, ?)`
+      ).run(fechaTicket, clienteId, total, `Ticket ${ticketNumero(ticketId)}`, ticketId);
+    }
+
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+
+  return { id: ticketId, numero: ticketNumero(ticketId), fecha: fechaTicket, total, tipoPago, items: lineas };
+}
+
+/** Numero de comprobante interno mostrado en el ticket (no es una factura). */
+export function ticketNumero(id) {
+  return `X-${String(id).padStart(6, '0')}`;
+}
+
+/** Saldo actual de un cliente en cuenta corriente = cargos - pagos. */
+export function saldoCliente(clienteId) {
+  const row = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN tipo = 'cargo' THEN monto ELSE 0 END), 0) AS cargos,
+         COALESCE(SUM(CASE WHEN tipo = 'pago' THEN monto ELSE 0 END), 0) AS pagos
+       FROM cuenta_corriente_movimientos WHERE cliente_id = ?`
+    )
+    .get(clienteId);
+  return row.cargos - row.pagos;
+}
+
+/** Lista de clientes con saldo en cuenta corriente (para el modulo Deudores). */
+export function listaDeudores() {
+  const clientes = db.prepare('SELECT id, nombre, tipo, contacto FROM clientes ORDER BY nombre').all();
+  return clientes.map((c) => ({ ...c, saldo: saldoCliente(c.id) }));
+}
+
+/** Registra un pago (cobro) de un cliente, reduciendo su saldo en cuenta corriente. */
+export function registrarPago({ clienteId, monto, fecha, referencia }) {
+  if (!clienteId) throw new Error('Cliente requerido');
+  if (!(monto > 0)) throw new Error('El monto del pago debe ser mayor a 0');
+  const cliente = db.prepare('SELECT id FROM clientes WHERE id = ?').get(clienteId);
+  if (!cliente) throw new Error('Cliente inexistente');
+
+  const fechaPago = fecha || new Date().toISOString().slice(0, 10);
+  const info = db
+    .prepare(
+      `INSERT INTO cuenta_corriente_movimientos (fecha, cliente_id, tipo, monto, referencia)
+       VALUES (?, ?, 'pago', ?, ?)`
+    )
+    .run(fechaPago, clienteId, monto, referencia || 'Pago recibido');
+
+  return { id: Number(info.lastInsertRowid), saldo: saldoCliente(clienteId) };
 }
 
 /** Resultado mensual: ventas, costo de mercaderia vendida, margen bruto, gastos fijos, resultado neto. */
@@ -165,7 +267,7 @@ export function alertasStock() {
     .map((i) => ({ ...i, stockActual: stockInsumo(i.id) }))
     .filter((i) => i.stockActual < i.stock_minimo);
 
-  const productos = db.prepare('SELECT id, nombre, stock_minimo FROM productos WHERE activo = 1').all();
+  const productos = db.prepare('SELECT id, nombre, categoria, stock_minimo FROM productos WHERE activo = 1').all();
   const alertasProductos = productos
     .map((p) => ({ ...p, stockActual: stockProductoTerminado(p.id) }))
     .filter((p) => p.stockActual < p.stock_minimo);

@@ -133,30 +133,38 @@ const sections = {
   proveedores: {
     title: 'Proveedores', api: 'proveedores',
     fields: [
+      { key: 'codigo', label: 'Codigo' },
       { key: 'nombre', label: 'Nombre', required: true },
+      { key: 'insumos_que_provee', label: 'Insumos que provee' },
       { key: 'contacto', label: 'Contacto' },
       { key: 'condicion_pago', label: 'Condicion de pago' },
     ],
     columns: [
-      { key: 'nombre', label: 'Nombre' }, { key: 'contacto', label: 'Contacto' }, { key: 'condicion_pago', label: 'Cond. pago' },
+      { key: 'codigo', label: 'Cod.' }, { key: 'nombre', label: 'Nombre' }, { key: 'insumos_que_provee', label: 'Provee' },
+      { key: 'contacto', label: 'Contacto' }, { key: 'condicion_pago', label: 'Cond. pago' },
     ],
   },
   clientes: {
     title: 'Clientes', api: 'clientes',
     fields: [
+      { key: 'codigo', label: 'Codigo' },
       { key: 'nombre', label: 'Nombre' },
       { key: 'tipo', label: 'Tipo', type: 'options', options: ['particular', 'mayorista', 'revendedor'] },
       { key: 'contacto', label: 'Contacto' },
+      { key: 'zona', label: 'Zona' },
     ],
     columns: [
-      { key: 'nombre', label: 'Nombre' }, { key: 'tipo', label: 'Tipo' }, { key: 'contacto', label: 'Contacto' },
+      { key: 'codigo', label: 'Cod.' }, { key: 'nombre', label: 'Nombre' }, { key: 'tipo', label: 'Tipo' },
+      { key: 'contacto', label: 'Contacto' }, { key: 'zona', label: 'Zona' },
       { label: 'Total comprado', render: (r) => money(r.totalComprado) },
+      { label: 'Saldo cta. cte.', render: (r) => r.saldoCuentaCorriente > 0 ? `<span class="badge warn">${money(r.saldoCuentaCorriente)}</span>` : money(r.saldoCuentaCorriente) },
     ],
   },
   insumos: {
     title: 'Insumos', api: 'insumos',
     refs: [{ name: 'proveedor_id', api: 'proveedores' }],
     fields: [
+      { key: 'codigo', label: 'Codigo' },
       { key: 'nombre', label: 'Nombre' },
       { key: 'unidad', label: 'Unidad' },
       { key: 'costo_unitario', label: 'Costo unitario', type: 'number', step: '0.01' },
@@ -164,7 +172,7 @@ const sections = {
       { key: 'stock_minimo', label: 'Stock minimo', type: 'number', step: '0.01' },
     ],
     columns: [
-      { key: 'nombre', label: 'Nombre' }, { key: 'unidad', label: 'Unidad' },
+      { key: 'codigo', label: 'Cod.' }, { key: 'nombre', label: 'Nombre' }, { key: 'unidad', label: 'Unidad' },
       { label: 'Costo unit.', render: (r) => money(r.costo_unitario) },
       { key: 'proveedor_nombre', label: 'Proveedor' },
       { label: 'Stock actual', render: (r) => `${num(r.stockActual)} ${r.unidad}` },
@@ -175,16 +183,19 @@ const sections = {
   productos: {
     title: 'Productos', api: 'productos',
     fields: [
-      { key: 'nombre', label: 'Nombre' },
+      { key: 'codigo', label: 'Codigo' },
+      { key: 'nombre', label: 'Nombre (sabor)' },
       { key: 'categoria', label: 'Categoria' },
+      { key: 'unidad_venta', label: 'Unidad de venta' },
       { key: 'precio_venta', label: 'Precio venta', type: 'number', step: '0.01' },
       { key: 'stock_inicial', label: 'Stock inicial', type: 'number', step: '0.01' },
       { key: 'stock_minimo', label: 'Stock minimo', type: 'number', step: '0.01' },
     ],
     columns: [
-      { key: 'nombre', label: 'Nombre' }, { key: 'categoria', label: 'Categoria' },
-      { label: 'Costo unit.', render: (r) => `${money(r.costoUnitario)} <span class="note">(${r.origenCosteo})</span>` },
-      { label: 'Precio venta', render: (r) => money(r.precio_venta) },
+      { key: 'codigo', label: 'Cod.' }, { key: 'categoria', label: 'Categoria' }, { key: 'nombre', label: 'Nombre' },
+      { key: 'unidad_venta', label: 'Unidad venta' },
+      { label: 'Costo unit.', render: (r) => r.origenCosteo === 'sin_datos' ? '<span class="note">sin costear</span>' : `${money(r.costoUnitario)} <span class="note">(${r.origenCosteo})</span>` },
+      { label: 'Precio venta', render: (r) => r.precio_venta > 0 ? money(r.precio_venta) : '<span class="note">sin definir</span>' },
       { label: 'Margen', render: (r) => money(r.margen) },
       { label: 'Stock', render: (r) => num(r.stockActual) },
       { label: 'Estado', render: (r) => r.alertaStock ? '<span class="badge warn">Bajo stock</span>' : '<span class="badge ok">OK</span>' },
@@ -240,7 +251,7 @@ async function renderDashboard(container) {
         </div>
         <div class="card">
           <h3>Alertas de productos terminados (stock bajo)</h3>
-          ${alertas.productos.length === 0 ? '<p class="empty">Sin alertas.</p>' : `<ul class="alert-list">${alertas.productos.map((p) => `<li>⚠️ <strong>${p.nombre}</strong>: ${num(p.stockActual)} unidades (minimo ${num(p.stock_minimo)})</li>`).join('')}</ul>`}
+          ${alertas.productos.length === 0 ? '<p class="empty">Sin alertas.</p>' : `<ul class="alert-list">${alertas.productos.map((p) => `<li>⚠️ <strong>${p.categoria ? p.categoria + ' - ' : ''}${p.nombre}</strong>: ${num(p.stockActual)} unidades (minimo ${num(p.stock_minimo)})</li>`).join('')}</ul>`}
         </div>
       </div>
     `;
@@ -265,7 +276,7 @@ async function renderProduccion(container) {
       <h2>Produccion</h2>
       <p class="note">Al registrar una produccion se calcula el costo (ficha estandar o receta BOM) y se descuentan automaticamente los insumos usados segun la receta.</p>
       <form class="inline-form" id="form-prod">
-        <label>Producto <select name="producto_id">${productos.map((p) => `<option value="${p.id}">${p.nombre}</option>`).join('')}</select></label>
+        <label>Producto <select name="producto_id">${productos.map((p) => `<option value="${p.id}">${p.nombreCompleto}</option>`).join('')}</select></label>
         <label>Cantidad <input name="cantidad" type="number" step="0.01" required></label>
         <label>Fecha <input name="fecha" type="date" value="${todayISO()}"></label>
         <button type="submit">Registrar produccion</button>
@@ -292,48 +303,129 @@ async function renderProduccion(container) {
   load();
 }
 
-// ---------- Ventas ----------
+// ---------- Ventas: formulario de ticket (multi-producto) ----------
+function renderTicketPrint(ticket) {
+  const fecha = new Date(ticket.fecha + 'T00:00:00').toLocaleDateString('es-AR');
+  return `
+    <div class="ticket card" id="ticket-print">
+      <div class="ticket-header">
+        <h3>🍝 Pastas Caseras</h3>
+        <div class="ticket-num">Ticket ${ticket.numero}</div>
+        <div class="note">Comprobante interno - NO VALIDO COMO FACTURA</div>
+      </div>
+      <div class="ticket-meta">
+        <div>Fecha: ${fecha}</div>
+        <div>Cliente: ${ticket.cliente_nombre || 'Consumidor final'}</div>
+        <div>Pago: ${ticket.tipo_pago === 'cuenta_corriente' ? 'Cuenta corriente (pago diferido)' : `Contado${ticket.forma_pago ? ' - ' + ticket.forma_pago : ''}`}</div>
+      </div>
+      <table class="ticket-items"><thead><tr><th>Producto</th><th>Cant.</th><th>P. unit.</th><th>Subtotal</th></tr></thead>
+      <tbody>${ticket.items.map((it) => `<tr><td>${it.producto_nombre}</td><td>${num(it.cantidad)}</td><td>${money(it.precio_unitario)}</td><td>${money(it.subtotal)}</td></tr>`).join('')}</tbody></table>
+      <div class="ticket-total">TOTAL: ${money(ticket.total)}</div>
+      <button class="secondary no-print" id="btn-print">Imprimir ticket</button>
+    </div>
+  `;
+}
+
 async function renderVentas(container) {
   const [productos, clientes] = await Promise.all([api.get('productos'), api.get('clientes')]);
-  async function load(msgHtml = '') {
-    const rows = await api.get('ventas');
+  const activos = productos.filter((p) => p.activo);
+
+  async function load(extraHtml = '') {
+    const tickets = await api.get('tickets');
     container.innerHTML = `
-      <h2>Ventas</h2>
-      <form class="inline-form" id="form-venta">
-        <label>Producto <select name="producto_id">${productos.map((p) => `<option value="${p.id}" data-precio="${p.precio_venta}">${p.nombre}</option>`).join('')}</select></label>
-        <label>Cliente <select name="cliente_id"><option value="">-</option>${clientes.map((c) => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select></label>
-        <label>Cantidad <input name="cantidad" type="number" step="0.01" required></label>
-        <label>Precio unitario <input name="precio_unitario" type="number" step="0.01"></label>
-        <label>Forma de pago <select name="forma_pago"><option>efectivo</option><option>transferencia</option><option>tarjeta</option></select></label>
-        <label>Fecha <input name="fecha" type="date" value="${todayISO()}"></label>
-        <button type="submit">Registrar venta</button>
+      <h2>Ventas - Nuevo Ticket</h2>
+      <p class="note">Cargar la cantidad de cada producto vendido y emitir el ticket. "Contado" = pago inmediato; "Cuenta corriente" = pago diferido (se suma a la deuda del cliente en el modulo Deudores).</p>
+      <form class="card" id="form-ticket">
+        <div class="toolbar">
+          <label>Cliente
+            <select name="cliente_id"><option value="">Consumidor final</option>${clientes.map((c) => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select>
+          </label>
+          <label>Tipo de pago
+            <select name="tipo_pago">
+              <option value="contado">Contado (pago inmediato)</option>
+              <option value="cuenta_corriente">Cuenta corriente (pago diferido)</option>
+            </select>
+          </label>
+          <label id="forma-pago-wrap">Forma de pago
+            <select name="forma_pago"><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option></select>
+          </label>
+          <label>Fecha <input name="fecha" type="date" value="${todayISO()}"></label>
+        </div>
+        <p class="note">Los productos sin precio de venta cargado no se pueden vender todavia: definir el precio desde la pantalla de Productos.</p>
+        <table class="ticket-form-table">
+          <thead><tr><th>Producto</th><th>Precio</th><th>Cantidad</th></tr></thead>
+          <tbody>${activos.map((p) => `
+            <tr${p.precio_venta > 0 ? '' : ' style="opacity:0.5"'}>
+              <td>${p.nombreCompleto}</td>
+              <td>${p.precio_venta > 0 ? money(p.precio_venta) : '<span class="note">sin precio</span>'}</td>
+              <td><input type="number" min="0" step="0.01" data-producto="${p.id}" data-precio="${p.precio_venta}" placeholder="0" style="width:80px" ${p.precio_venta > 0 ? '' : 'disabled title="Este producto todavia no tiene precio de venta cargado"'}></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <div class="toolbar">
+          <button type="submit">Emitir ticket</button>
+          <div id="ticket-total-preview" class="note"></div>
+        </div>
       </form>
-      <div id="venta-msg">${msgHtml}</div>
-      <table><thead><tr><th>Fecha</th><th>Producto</th><th>Cliente</th><th>Cant.</th><th>Precio unit.</th><th>Subtotal</th><th>Costo</th><th>Margen</th></tr></thead>
-      <tbody>${rows.map((r) => `<tr><td>${r.fecha}</td><td>${r.producto_nombre}</td><td>${r.cliente_nombre || '-'}</td><td>${num(r.cantidad)}</td><td>${money(r.precio_unitario)}</td><td>${money(r.subtotal)}</td><td>${money(r.costo_total)}</td><td>${money(r.margen)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Sin ventas todavia.</td></tr>'}</tbody></table>
+      <div id="ticket-msg">${extraHtml}</div>
+      <h3>Tickets emitidos <a class="btn secondary" style="font-size:0.78rem;padding:4px 10px" href="/api/export/ventas">Exportar ventas CSV</a></h3>
+      <table><thead><tr><th>Ticket</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Pago</th><th>Total</th><th></th></tr></thead>
+      <tbody>${tickets.map((t) => `<tr><td>${t.numero}</td><td>${t.fecha}</td><td>${t.cliente_nombre || 'Consumidor final'}</td><td>${t.items}</td><td>${t.tipo_pago === 'cuenta_corriente' ? 'Cta. corriente' : (t.forma_pago || 'Contado')}</td><td>${money(t.total)}</td><td><button class="secondary" data-ver="${t.id}">Ver ticket</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">Sin tickets todavia.</td></tr>'}</tbody></table>
     `;
-    const form = container.querySelector('#form-venta');
-    const precioInput = form.elements.precio_unitario;
-    const productoSel = form.elements.producto_id;
-    productoSel.onchange = () => { precioInput.placeholder = productoSel.selectedOptions[0].dataset.precio; };
-    productoSel.dispatchEvent(new Event('change'));
+
+    const form = container.querySelector('#form-ticket');
+    const tipoPagoSel = form.elements.tipo_pago;
+    const formaPagoWrap = container.querySelector('#forma-pago-wrap');
+    const qtyInputs = [...form.querySelectorAll('input[data-producto]')];
+    const totalPreview = container.querySelector('#ticket-total-preview');
+
+    function updateTotal() {
+      const total = qtyInputs.reduce((acc, inp) => acc + (Number(inp.value) || 0) * Number(inp.dataset.precio), 0);
+      totalPreview.textContent = `Total: ${money(total)}`;
+    }
+    function syncTipoPago() {
+      formaPagoWrap.style.display = tipoPagoSel.value === 'contado' ? '' : 'none';
+    }
+    qtyInputs.forEach((inp) => inp.addEventListener('input', updateTotal));
+    tipoPagoSel.onchange = syncTipoPago;
+    syncTipoPago();
+    updateTotal();
+
     form.onsubmit = async (e) => {
       e.preventDefault();
-      const f = e.target;
+      const items = qtyInputs
+        .filter((inp) => Number(inp.value) > 0)
+        .map((inp) => ({ productoId: Number(inp.dataset.producto), cantidad: Number(inp.value) }));
+      if (items.length === 0) {
+        load(`<p class="result-msg error">Cargar la cantidad de al menos un producto.</p>`);
+        return;
+      }
       try {
-        const result = await api.post('ventas', {
-          producto_id: Number(f.producto_id.value),
-          cliente_id: f.cliente_id.value ? Number(f.cliente_id.value) : null,
-          cantidad: Number(f.cantidad.value),
-          precio_unitario: f.precio_unitario.value ? Number(f.precio_unitario.value) : undefined,
-          forma_pago: f.forma_pago.value,
-          fecha: f.fecha.value,
+        const ticket = await api.post('tickets', {
+          cliente_id: form.elements.cliente_id.value ? Number(form.elements.cliente_id.value) : null,
+          tipo_pago: tipoPagoSel.value,
+          forma_pago: form.elements.forma_pago.value,
+          fecha: form.elements.fecha.value,
+          items,
         });
-        load(`<p class="result-msg ok">Venta registrada. Subtotal ${money(result.subtotal)}, costo ${money(result.costoTotal)}, margen ${money(result.margen)}.</p>`);
+        const full = await api.get(`tickets/${ticket.id}`);
+        await load(renderTicketPrint(full));
+        const btn = container.querySelector('#btn-print');
+        if (btn) btn.onclick = () => window.print();
       } catch (err) {
         load(`<p class="result-msg error">${err.message}</p>`);
       }
     };
+
+    container.querySelectorAll('[data-ver]').forEach((btn) => {
+      btn.onclick = async () => {
+        const full = await api.get(`tickets/${btn.dataset.ver}`);
+        await load(renderTicketPrint(full));
+        const printBtn = container.querySelector('#btn-print');
+        if (printBtn) printBtn.onclick = () => window.print();
+        container.querySelector('#ticket-print')?.scrollIntoView({ behavior: 'smooth' });
+      };
+    });
   }
   load();
 }
@@ -389,7 +481,7 @@ async function renderCosteo(container) {
       <h2>Costeo Estandar</h2>
       <p class="note">Ficha de costo por lote de produccion. Costo unitario = (insumos masa + insumos relleno + mano de obra) / porciones por lote. Mano de obra = (horas armado + masa + relleno + empaquetado) x personas x costo hora.</p>
       <form class="inline-form" id="form-costeo">
-        <label>Producto <select name="producto_id">${productos.map((p) => `<option value="${p.id}">${p.nombre}</option>`).join('')}</select></label>
+        <label>Producto <select name="producto_id">${productos.map((p) => `<option value="${p.id}">${p.nombreCompleto}</option>`).join('')}</select></label>
         <label>Porciones por lote <input name="porciones_por_lote" type="number" step="0.01" required></label>
         <label>Horas armado <input name="horas_armado" type="number" step="0.01"></label>
         <label>Horas masa <input name="horas_masa" type="number" step="0.01"></label>
@@ -445,7 +537,7 @@ async function renderRecetas(container) {
       <h2>Recetas (BOM)</h2>
       <p class="note">Receta insumo por insumo. Se usa para descontar stock en cada produccion, y como metodo de costeo de respaldo cuando el producto no tiene ficha de Costeo Estandar.</p>
       <div class="toolbar">
-        <label>Producto: <select id="prod-sel">${productos.map((p) => `<option value="${p.id}" ${p.id === productoId ? 'selected' : ''}>${p.nombre}</option>`).join('')}</select></label>
+        <label>Producto: <select id="prod-sel">${productos.map((p) => `<option value="${p.id}" ${p.id === productoId ? 'selected' : ''}>${p.nombreCompleto}</option>`).join('')}</select></label>
       </div>
       <form class="inline-form" id="form-receta">
         <label>Insumo <select name="insumo_id">${insumos.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('')}</select></label>
@@ -481,6 +573,69 @@ async function renderRecetas(container) {
   load();
 }
 
+// ---------- Deudores (cuenta corriente) ----------
+async function renderDeudores(container) {
+  async function load(msgHtml = '', clienteAbierto = null) {
+    const deudores = await api.get('deudores');
+    const conSaldo = deudores.filter((d) => d.saldo !== 0);
+    container.innerHTML = `
+      <h2>Deudores (Cuenta Corriente)</h2>
+      <p class="note">Clientes con ventas a pago diferido. El saldo aumenta con cada ticket a cuenta corriente y baja al registrar un pago.</p>
+      <div class="grid">
+        <div class="stat"><div class="label">Total a cobrar</div><div class="value">${money(conSaldo.reduce((a, d) => a + Math.max(d.saldo, 0), 0))}</div></div>
+        <div class="stat"><div class="label">Clientes con deuda</div><div class="value">${conSaldo.filter((d) => d.saldo > 0).length}</div></div>
+      </div>
+      <div id="deudores-msg">${msgHtml}</div>
+      <table><thead><tr><th>Cliente</th><th>Tipo</th><th>Contacto</th><th>Saldo</th><th></th></tr></thead>
+      <tbody>${deudores.map((d) => `<tr>
+        <td>${d.nombre}</td><td>${d.tipo}</td><td>${d.contacto || ''}</td>
+        <td>${d.saldo > 0 ? `<span class="badge warn">${money(d.saldo)}</span>` : money(d.saldo)}</td>
+        <td><button class="secondary" data-ver="${d.id}">Ver movimientos</button></td>
+      </tr>`).join('') || '<tr><td colspan="5" class="empty">Sin clientes.</td></tr>'}</tbody></table>
+      <div id="deudor-detalle"></div>
+    `;
+    container.querySelectorAll('[data-ver]').forEach((btn) => {
+      btn.onclick = () => verDetalle(Number(btn.dataset.ver));
+    });
+    if (clienteAbierto) verDetalle(clienteAbierto);
+  }
+
+  async function verDetalle(clienteId) {
+    const { movimientos, saldo } = await api.get(`deudores/${clienteId}/movimientos`);
+    const cliente = (await api.get('clientes')).find((c) => c.id === clienteId);
+    const detalle = container.querySelector('#deudor-detalle');
+    detalle.innerHTML = `
+      <div class="card">
+        <h3>${cliente.nombre} - Saldo: ${money(saldo)}</h3>
+        <form class="inline-form" id="form-pago">
+          <label>Registrar pago <input name="monto" type="number" step="0.01" min="0.01" required></label>
+          <label>Fecha <input name="fecha" type="date" value="${todayISO()}"></label>
+          <label>Referencia <input name="referencia" type="text" placeholder="Ej: pago en efectivo"></label>
+          <button type="submit">Registrar pago</button>
+        </form>
+        <table><thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Referencia</th></tr></thead>
+        <tbody>${movimientos.map((m) => `<tr><td>${m.fecha}</td><td>${m.tipo === 'cargo' ? 'Cargo (venta)' : 'Pago'}</td><td>${m.tipo === 'cargo' ? money(m.monto) : '-' + money(m.monto)}</td><td>${m.referencia || ''}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Sin movimientos.</td></tr>'}</tbody></table>
+      </div>
+    `;
+    detalle.querySelector('#form-pago').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      try {
+        await api.post('deudores/pagos', {
+          cliente_id: clienteId,
+          monto: Number(f.monto.value),
+          fecha: f.fecha.value,
+          referencia: f.referencia.value,
+        });
+        load(`<p class="result-msg ok">Pago registrado.</p>`, clienteId);
+      } catch (err) {
+        load(`<p class="result-msg error">${err.message}</p>`, clienteId);
+      }
+    };
+  }
+  load();
+}
+
 // ---------- Export buttons (added to catalog/finance pages) ----------
 function addExportButton(container, table) {
   const btn = el(`<a class="btn secondary" href="/api/export/${table}">Exportar CSV</a>`);
@@ -503,8 +658,11 @@ const routes = {
   insumos: (c) => renderCrud(c, sections.insumos),
   productos: (c) => renderCrud(c, sections.productos),
   gastos: (c) => renderCrud(c, sections.gastos),
+  deudores: renderDeudores,
 };
-const exportable = { productos: 'productos', insumos: 'insumos', ventas: 'ventas', produccion: 'produccion', inventario: 'inventario_insumos', clientes: 'clientes', proveedores: 'proveedores', gastos: 'gastos_fijos', costeo: 'costeo_estandar', recetas: 'recetas_bom' };
+// 'ventas' y 'deudores' arman su propio toolbar (formulario de ticket / cuenta
+// corriente), asi que no reciben el boton de exportacion generico.
+const exportable = { productos: 'productos', insumos: 'insumos', produccion: 'produccion', inventario: 'inventario_insumos', clientes: 'clientes', proveedores: 'proveedores', gastos: 'gastos_fijos', costeo: 'costeo_estandar', recetas: 'recetas_bom' };
 
 async function router() {
   const hash = location.hash.replace('#/', '') || 'dashboard';
