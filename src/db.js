@@ -4,7 +4,11 @@ import { dirname, join } from 'node:path';
 import { readFileSync, mkdirSync, existsSync } from 'node:fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(__dirname, '..', 'data');
+// DATA_DIR permite apuntar la base a un disco persistente (por ejemplo un
+// Persistent Disk de Render montado en /var/data) para que los datos no se
+// pierdan cuando el servicio se reinicia. Sin esa variable, usa una carpeta
+// local (sirve para desarrollo, pero no persiste en hosting sin disco).
+const dataDir = process.env.DATA_DIR || join(__dirname, '..', 'data');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
 const dbPath = join(dataDir, 'pastas.db');

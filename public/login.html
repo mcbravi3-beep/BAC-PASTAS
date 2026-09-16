@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ingresar - Gestion Pastas Caseras</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .login-card { max-width: 340px; width: 100%; }
+    .login-card h1 { text-align: center; margin-bottom: 4px; }
+    .login-card p.note { text-align: center; margin-bottom: 18px; }
+    .login-card form { display: flex; flex-direction: column; gap: 12px; }
+    .login-card label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+    .login-card button { margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card login-card">
+    <h1>🍝 Pastas Caseras</h1>
+    <p class="note">Ingresa tu usuario y clave para entrar al sistema.</p>
+    <form id="form-login">
+      <label>Usuario <input name="usuario" type="text" autocomplete="username" required autofocus></label>
+      <label>Clave <input name="clave" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Ingresar</button>
+    </form>
+    <div id="login-msg"></div>
+  </div>
+  <script>
+    document.getElementById('form-login').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const msg = document.getElementById('login-msg');
+      msg.innerHTML = '';
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usuario: f.usuario.value, clave: f.clave.value }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error || 'Error');
+        location.href = '/';
+      } catch (err) {
+        msg.innerHTML = `<p class="result-msg error">${err.message}</p>`;
+      }
+    };
+  </script>
+</body>
+</html>

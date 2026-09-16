@@ -1,8 +1,13 @@
 // Sistema de Gestion - Fabrica de Pastas Caseras - Frontend (vanilla JS)
 
+function redirectToLogin() {
+  location.href = '/login.html';
+}
+
 const api = {
   async get(path) {
     const r = await fetch(`/api/${path}`);
+    if (r.status === 401) return redirectToLogin();
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error');
     return r.json();
   },
@@ -12,6 +17,7 @@ const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (r.status === 401) return redirectToLogin();
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error');
     return r.status === 204 ? null : r.json();
   },
@@ -19,6 +25,7 @@ const api = {
   put(path, body) { return this.send('PUT', path, body); },
   async del(path) {
     const r = await fetch(`/api/${path}`, { method: 'DELETE' });
+    if (r.status === 401) return redirectToLogin();
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error');
   },
 };
@@ -677,4 +684,14 @@ async function router() {
   }
 }
 window.addEventListener('hashchange', router);
-router();
+
+document.getElementById('btn-logout').onclick = async () => {
+  await fetch('/api/logout', { method: 'POST' });
+  redirectToLogin();
+};
+
+(async () => {
+  const { autenticado } = await fetch('/api/session').then((r) => r.json());
+  if (!autenticado) return redirectToLogin();
+  router();
+})();
