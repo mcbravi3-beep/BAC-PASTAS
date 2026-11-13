@@ -8,7 +8,7 @@
   <style>
     body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
     .login-card { max-width: 340px; width: 100%; }
-    .login-card h1 { text-align: center; margin-bottom: 4px; }
+    .login-card .logo { display: block; width: 110px; height: 110px; margin: 0 auto 12px; border-radius: 50%; object-fit: cover; }
     .login-card p.note { text-align: center; margin-bottom: 18px; }
     .login-card form { display: flex; flex-direction: column; gap: 12px; }
     .login-card label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
@@ -17,7 +17,7 @@
 </head>
 <body>
   <div class="card login-card">
-    <h1>🍝 Pastas Caseras</h1>
+    <img src="logo.jpg" alt="Bac Pastas Caseras" class="logo">
     <p class="note">Ingresa tu usuario y clave para entrar al sistema.</p>
     <form id="form-login">
       <label>Usuario <input name="usuario" type="text" autocomplete="username" required autofocus></label>

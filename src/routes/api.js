@@ -1,6 +1,9 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import multer from 'multer';
+import { statSync, writeFileSync } from 'node:fs';
+import { db, dbPath, reabrirConexion } from '../db.js';
 import { crudRouter } from './crud.js';
+import { requireAdmin, hashClave } from '../auth.js';
 import {
   costoUnitarioProducto,
   stockInsumo,
@@ -22,11 +25,33 @@ export const api = Router();
 api.use('/proveedores', crudRouter('proveedores', ['codigo', 'nombre', 'insumos_que_provee', 'contacto', 'condicion_pago'], { orderBy: 'nombre' }));
 
 // --- Clientes (CRUD simple + total comprado y saldo cuenta corriente calculados) ---
-const clientesBase = crudRouter('clientes', ['codigo', 'nombre', 'tipo', 'contacto', 'zona'], { orderBy: 'nombre' });
+// El codigo (C001, C002, ...) lo asigna el sistema solo: no se escribe a mano.
+const clientesBase = crudRouter('clientes', ['nombre', 'tipo', 'contacto', 'zona'], { orderBy: 'nombre' });
+function siguienteCodigoCliente() {
+  const codigos = db.prepare("SELECT codigo FROM clientes WHERE codigo LIKE 'C%'").all();
+  const max = codigos.reduce((acc, { codigo }) => {
+    const n = parseInt(codigo.slice(1), 10);
+    return Number.isFinite(n) && n > acc ? n : acc;
+  }, 0);
+  return `C${String(max + 1).padStart(3, '0')}`;
+}
 api.get('/clientes', (req, res) => {
   const clientes = db.prepare('SELECT * FROM clientes ORDER BY nombre').all();
   const totalStmt = db.prepare('SELECT COALESCE(SUM(subtotal), 0) AS total FROM ventas WHERE cliente_id = ?');
   res.json(clientes.map((c) => ({ ...c, totalComprado: totalStmt.get(c.id).total, saldoCuentaCorriente: saldoCliente(c.id) })));
+});
+api.post('/clientes', (req, res) => {
+  try {
+    const { nombre, tipo, contacto, zona } = req.body;
+    const codigo = siguienteCodigoCliente();
+    const info = db
+      .prepare('INSERT INTO clientes (codigo, nombre, tipo, contacto, zona) VALUES (?,?,?,?,?)')
+      .run(codigo, nombre, tipo, contacto ?? null, zona ?? null);
+    const row = db.prepare('SELECT * FROM clientes WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 api.use('/clientes', clientesBase);
 
@@ -347,4 +372,70 @@ api.get('/export/:tabla', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.tabla}.csv"`);
   res.send('﻿' + csv);
+});
+
+// --- Copia de seguridad completa (todo el sistema en un solo archivo) ---
+// Solo el administrador puede descargar/restaurar backups.
+const SQLITE_MAGIC = Buffer.from('SQLite format 3\0', 'utf8');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
+
+api.get('/backup/descargar', requireAdmin, (req, res) => {
+  const fecha = new Date().toISOString().slice(0, 10);
+  res.download(dbPath, `backup-pastas-caseras-${fecha}.db`);
+});
+
+api.get('/backup/info', requireAdmin, (req, res) => {
+  const stats = statSync(dbPath);
+  res.json({ tamanioBytes: stats.size, ultimaModificacion: stats.mtime });
+});
+
+api.post('/backup/restaurar', requireAdmin, upload.single('archivo'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Falta el archivo de copia de seguridad' });
+    const header = req.file.buffer.subarray(0, 16);
+    if (!header.equals(SQLITE_MAGIC)) {
+      return res.status(400).json({ error: 'El archivo no es una copia de seguridad valida de este sistema' });
+    }
+    db.close();
+    writeFileSync(dbPath, req.file.buffer);
+    reabrirConexion();
+    res.json({ ok: true });
+  } catch (err) {
+    reabrirConexion();
+    res.status(500).json({ error: 'No se pudo restaurar la copia: ' + err.message });
+  }
+});
+
+// --- Usuarios (solo administrador: crear, habilitar/deshabilitar, eliminar) ---
+api.get('/usuarios', requireAdmin, (req, res) => {
+  const usuarios = db.prepare('SELECT id, usuario, nombre, rol, habilitado FROM usuarios ORDER BY usuario').all();
+  res.json(usuarios);
+});
+
+api.post('/usuarios', requireAdmin, (req, res) => {
+  try {
+    const { usuario, clave, nombre, rol } = req.body;
+    if (!usuario || !clave) return res.status(400).json({ error: 'Usuario y clave son obligatorios' });
+    if (clave.length < 4) return res.status(400).json({ error: 'La clave debe tener al menos 4 caracteres' });
+    const info = db
+      .prepare('INSERT INTO usuarios (usuario, clave_hash, nombre, rol, habilitado) VALUES (?,?,?,?,1)')
+      .run(usuario, hashClave(clave), nombre || null, rol === 'admin' ? 'admin' : 'operador');
+    const row = db.prepare('SELECT id, usuario, nombre, rol, habilitado FROM usuarios WHERE id = ?').get(info.lastInsertRowid);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(400).json({ error: err.message.includes('UNIQUE') ? 'Ese nombre de usuario ya existe' : err.message });
+  }
+});
+
+api.put('/usuarios/:id/habilitado', requireAdmin, (req, res) => {
+  const info = db.prepare('UPDATE usuarios SET habilitado = ? WHERE id = ?').run(req.body.habilitado ? 1 : 0, req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'No encontrado' });
+  const row = db.prepare('SELECT id, usuario, nombre, rol, habilitado FROM usuarios WHERE id = ?').get(req.params.id);
+  res.json(row);
+});
+
+api.delete('/usuarios/:id', requireAdmin, (req, res) => {
+  const info = db.prepare('DELETE FROM usuarios WHERE id = ?').run(req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'No encontrado' });
+  res.status(204).end();
 });

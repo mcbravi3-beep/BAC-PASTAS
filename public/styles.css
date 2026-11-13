@@ -25,7 +25,8 @@ body {
   border-right: 1px solid var(--border);
   padding: 16px 12px;
 }
-.sidebar h1 { font-size: 1.15rem; margin: 4px 8px 16px; }
+.sidebar .brand { text-align: center; margin: 4px 8px 16px; }
+.sidebar .brand .logo { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; }
 .nav-group { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 8px 4px; }
 .sidebar a {
   display: block;
@@ -90,7 +91,7 @@ input, select {
 
 .ticket { max-width: 340px; margin-top: 16px; font-family: "Courier New", monospace; border: 1px dashed var(--border); }
 .ticket-header { text-align: center; margin-bottom: 8px; }
-.ticket-header h3 { margin: 0 0 4px; }
+.ticket-logo { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; margin-bottom: 4px; }
 .ticket-num { font-weight: 700; }
 .ticket-meta { font-size: 0.82rem; margin-bottom: 8px; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); padding: 6px 0; }
 .ticket-items { width: 100%; border-collapse: collapse; font-size: 0.82rem; box-shadow: none; }

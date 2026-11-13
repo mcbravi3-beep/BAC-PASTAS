@@ -138,3 +138,15 @@ CREATE INDEX IF NOT EXISTS idx_ventas_ticket ON ventas(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_produccion_fecha ON produccion(fecha);
 CREATE INDEX IF NOT EXISTS idx_gastos_periodo ON gastos_fijos(anio, mes);
 CREATE INDEX IF NOT EXISTS idx_cc_cliente ON cuenta_corriente_movimientos(cliente_id);
+
+-- Usuarios del sistema (ademas del admin maestro definido por variables de
+-- entorno ADMIN_USER/ADMIN_PASSWORD). Solo un admin puede crear y
+-- habilitar/deshabilitar usuarios.
+CREATE TABLE IF NOT EXISTS usuarios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario TEXT NOT NULL UNIQUE,
+  clave_hash TEXT NOT NULL,
+  nombre TEXT,
+  rol TEXT NOT NULL DEFAULT 'operador' CHECK (rol IN ('admin','operador')),
+  habilitado INTEGER NOT NULL DEFAULT 1
+);

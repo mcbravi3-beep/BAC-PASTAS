@@ -154,7 +154,6 @@ const sections = {
   clientes: {
     title: 'Clientes', api: 'clientes',
     fields: [
-      { key: 'codigo', label: 'Codigo' },
       { key: 'nombre', label: 'Nombre' },
       { key: 'tipo', label: 'Tipo', type: 'options', options: ['particular', 'mayorista', 'revendedor'] },
       { key: 'contacto', label: 'Contacto' },
@@ -235,6 +234,12 @@ async function renderDashboard(container) {
     ]);
     container.innerHTML = `
       <h2>Dashboard</h2>
+      ${new Date().getDay() === 5 ? `
+        <div class="card" style="border:2px solid var(--warn);background:var(--warn-bg)">
+          <strong>📅 Hoy es viernes:</strong> no te olvides de descargar tu copia de seguridad semanal.
+          <a class="btn" style="margin-left:10px" href="#/backup">Ir a Copia de Seguridad</a>
+        </div>
+      ` : ''}
       <div class="toolbar">
         <label>Periodo:
           <select id="mes-sel"></select>
@@ -316,7 +321,7 @@ function renderTicketPrint(ticket) {
   return `
     <div class="ticket card" id="ticket-print">
       <div class="ticket-header">
-        <h3>🍝 Pastas Caseras</h3>
+        <img src="logo.jpg" alt="Bac Pastas Caseras" class="ticket-logo">
         <div class="ticket-num">Ticket ${ticket.numero}</div>
         <div class="note">Comprobante interno - NO VALIDO COMO FACTURA</div>
       </div>
@@ -643,6 +648,120 @@ async function renderDeudores(container) {
   load();
 }
 
+// ---------- Copia de seguridad ----------
+async function renderBackup(container) {
+  async function load(msgHtml = '') {
+    const info = await api.get('backup/info');
+    const fecha = new Date(info.ultimaModificacion).toLocaleString('es-AR');
+    container.innerHTML = `
+      <h2>Copia de Seguridad</h2>
+      <p class="note">Acá podés descargar una copia completa de todos los datos del sistema, y restaurarla si alguna vez hace falta volver atrás.</p>
+      <div class="card">
+        <h3>Descargar copia de seguridad</h3>
+        <p>Baja un único archivo con absolutamente todos los datos del sistema tal cual están ahora (productos, ventas, insumos, deudores, todo). Guardalo en tu computadora o en Google Drive / Dropbox.</p>
+        <p class="note">Última modificación de los datos: ${fecha}</p>
+        <a class="btn" href="/api/backup/descargar">Descargar copia de seguridad completa</a>
+      </div>
+      <div class="card">
+        <h3>Restaurar desde una copia</h3>
+        <p class="note">⚠️ Esto reemplaza TODOS los datos actuales por los del archivo que subas. Usalo solo si necesitás volver a un estado anterior.</p>
+        <form class="inline-form" id="form-restaurar">
+          <label>Archivo de copia (.db) <input type="file" name="archivo" accept=".db" required></label>
+          <button type="submit" class="danger">Restaurar</button>
+        </form>
+      </div>
+      <div id="backup-msg">${msgHtml}</div>
+    `;
+    container.querySelector('#form-restaurar').onsubmit = async (e) => {
+      e.preventDefault();
+      const archivo = e.target.elements.archivo.files[0];
+      if (!archivo) return;
+      if (!confirm('Esto va a borrar los datos actuales y reemplazarlos por los del archivo. ¿Confirmás que querés restaurar esta copia de seguridad?')) return;
+      const formData = new FormData();
+      formData.append('archivo', archivo);
+      try {
+        const r = await fetch('/api/backup/restaurar', { method: 'POST', body: formData });
+        if (r.status === 401) return redirectToLogin();
+        if (!r.ok) throw new Error((await r.json()).error || 'Error');
+        load(`<p class="result-msg ok">Copia restaurada correctamente. Los datos ya están actualizados.</p>`);
+      } catch (err) {
+        load(`<p class="result-msg error">${err.message}</p>`);
+      }
+    };
+  }
+  load();
+}
+
+// ---------- Usuarios (solo administrador) ----------
+async function renderUsuarios(container) {
+  async function load(msgHtml = '') {
+    let usuarios;
+    try {
+      usuarios = await api.get('usuarios');
+    } catch (err) {
+      container.innerHTML = `<p class="result-msg error">${err.message}</p>`;
+      return;
+    }
+    container.innerHTML = `
+      <h2>Usuarios</h2>
+      <p class="note">Desde acá creás los usuarios que van a poder entrar al sistema, y los habilitás o deshabilitás cuando haga falta.</p>
+      <form class="inline-form" id="form-usuario">
+        <label>Usuario <input name="usuario" type="text" required></label>
+        <label>Nombre <input name="nombre" type="text" placeholder="Opcional"></label>
+        <label>Clave <input name="clave" type="password" minlength="4" required></label>
+        <label>Rol <select name="rol"><option value="operador">Operador</option><option value="admin">Administrador</option></select></label>
+        <button type="submit">Crear usuario</button>
+      </form>
+      <div id="usuarios-msg">${msgHtml}</div>
+      <table><thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><em>admin maestro</em></td><td>-</td><td>admin</td><td><span class="badge ok">Habilitado</span></td><td class="note">No se puede deshabilitar</td></tr>
+        ${usuarios.map((u) => `<tr>
+          <td>${u.usuario}</td><td>${u.nombre || ''}</td><td>${u.rol}</td>
+          <td>${u.habilitado ? '<span class="badge ok">Habilitado</span>' : '<span class="badge warn">Deshabilitado</span>'}</td>
+          <td class="actions-cell">
+            <button class="secondary" data-toggle="${u.id}" data-valor="${u.habilitado ? 0 : 1}">${u.habilitado ? 'Deshabilitar' : 'Habilitar'}</button>
+            <button class="danger" data-del="${u.id}">Eliminar</button>
+          </td>
+        </tr>`).join('') || ''}
+      </tbody></table>
+    `;
+    container.querySelector('#form-usuario').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      try {
+        await api.post('usuarios', {
+          usuario: f.usuario.value,
+          nombre: f.nombre.value,
+          clave: f.clave.value,
+          rol: f.rol.value,
+        });
+        load(`<p class="result-msg ok">Usuario creado y habilitado.</p>`);
+      } catch (err) {
+        load(`<p class="result-msg error">${err.message}</p>`);
+      }
+    };
+    container.querySelectorAll('[data-toggle]').forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await api.put(`usuarios/${btn.dataset.toggle}/habilitado`, { habilitado: Number(btn.dataset.valor) });
+          load();
+        } catch (err) {
+          load(`<p class="result-msg error">${err.message}</p>`);
+        }
+      };
+    });
+    container.querySelectorAll('[data-del]').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('¿Eliminar este usuario? Ya no va a poder entrar al sistema.')) return;
+        await api.del(`usuarios/${btn.dataset.del}`);
+        load();
+      };
+    });
+  }
+  load();
+}
+
 // ---------- Export buttons (added to catalog/finance pages) ----------
 function addExportButton(container, table) {
   const btn = el(`<a class="btn secondary" href="/api/export/${table}">Exportar CSV</a>`);
@@ -666,6 +785,8 @@ const routes = {
   productos: (c) => renderCrud(c, sections.productos),
   gastos: (c) => renderCrud(c, sections.gastos),
   deudores: renderDeudores,
+  backup: renderBackup,
+  usuarios: renderUsuarios,
 };
 // 'ventas' y 'deudores' arman su propio toolbar (formulario de ticket / cuenta
 // corriente), asi que no reciben el boton de exportacion generico.
@@ -691,7 +812,10 @@ document.getElementById('btn-logout').onclick = async () => {
 };
 
 (async () => {
-  const { autenticado } = await fetch('/api/session').then((r) => r.json());
+  const { autenticado, rol } = await fetch('/api/session').then((r) => r.json());
   if (!autenticado) return redirectToLogin();
+  if (rol !== 'admin') {
+    document.querySelectorAll('[data-admin-only]').forEach((el) => el.remove());
+  }
   router();
 })();

@@ -11,10 +11,30 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = process.env.DATA_DIR || join(__dirname, '..', 'data');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
-const dbPath = join(dataDir, 'pastas.db');
-export const db = new DatabaseSync(dbPath);
+export const dbPath = join(dataDir, 'pastas.db');
+const schemaPath = join(__dirname, 'schema.sql');
 
-db.exec('PRAGMA foreign_keys = ON;');
+function open() {
+  const instance = new DatabaseSync(dbPath);
+  instance.exec('PRAGMA foreign_keys = ON;');
+  instance.exec(readFileSync(schemaPath, 'utf8'));
+  return instance;
+}
 
-const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
-db.exec(schema);
+export let db = open();
+
+/**
+ * Cierra la conexion actual y vuelve a abrir el archivo de la base (se usa
+ * despues de restaurar una copia de seguridad, que reemplaza el archivo
+ * en disco). Como el resto de los modulos importan `db` por nombre, al
+ * reasignar esta variable todos ven la conexion nueva automaticamente
+ * (ES modules usan "live bindings" para los named exports).
+ */
+export function reabrirConexion() {
+  try {
+    db.close();
+  } catch {
+    // ya estaba cerrada (por ejemplo, si quien restaura ya la cerro antes de escribir el archivo)
+  }
+  db = open();
+}
