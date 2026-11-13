@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS clientes (
   nombre TEXT NOT NULL,
   tipo TEXT NOT NULL DEFAULT 'particular' CHECK (tipo IN ('particular','mayorista','revendedor')),
   contacto TEXT,
-  zona TEXT
+  zona TEXT,
+  email TEXT
 );
 
 -- Un ticket agrupa una o mas lineas de venta (Ventas) emitidas juntas.
@@ -150,3 +151,18 @@ CREATE TABLE IF NOT EXISTS usuarios (
   rol TEXT NOT NULL DEFAULT 'operador' CHECK (rol IN ('admin','operador')),
   habilitado INTEGER NOT NULL DEFAULT 1
 );
+
+-- Auditoria: registro automatico de que hizo cada usuario (que creo,
+-- edito o borro, y cuando). Se llena solo via middleware, no hay que
+-- cargarla a mano desde ninguna pantalla.
+CREATE TABLE IF NOT EXISTS auditoria (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fecha TEXT NOT NULL,
+  usuario TEXT NOT NULL,
+  rol TEXT,
+  metodo TEXT NOT NULL,
+  ruta TEXT NOT NULL,
+  descripcion TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auditoria_fecha ON auditoria(fecha);
+CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria(usuario);

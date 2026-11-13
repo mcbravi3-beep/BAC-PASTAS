@@ -4,6 +4,7 @@ import { statSync, writeFileSync } from 'node:fs';
 import { db, dbPath, reabrirConexion } from '../db.js';
 import { crudRouter } from './crud.js';
 import { requireAdmin, hashClave } from '../auth.js';
+import { auditMiddleware } from '../auditoria.js';
 import {
   costoUnitarioProducto,
   stockInsumo,
@@ -20,13 +21,14 @@ import {
 } from '../costeo.js';
 
 export const api = Router();
+api.use(auditMiddleware);
 
 // --- Proveedores (CRUD simple) ---
 api.use('/proveedores', crudRouter('proveedores', ['codigo', 'nombre', 'insumos_que_provee', 'contacto', 'condicion_pago'], { orderBy: 'nombre' }));
 
 // --- Clientes (CRUD simple + total comprado y saldo cuenta corriente calculados) ---
 // El codigo (C001, C002, ...) lo asigna el sistema solo: no se escribe a mano.
-const clientesBase = crudRouter('clientes', ['nombre', 'tipo', 'contacto', 'zona'], { orderBy: 'nombre' });
+const clientesBase = crudRouter('clientes', ['nombre', 'tipo', 'contacto', 'zona', 'email'], { orderBy: 'nombre' });
 function siguienteCodigoCliente() {
   const codigos = db.prepare("SELECT codigo FROM clientes WHERE codigo LIKE 'C%'").all();
   const max = codigos.reduce((acc, { codigo }) => {
@@ -42,11 +44,11 @@ api.get('/clientes', (req, res) => {
 });
 api.post('/clientes', (req, res) => {
   try {
-    const { nombre, tipo, contacto, zona } = req.body;
+    const { nombre, tipo, contacto, zona, email } = req.body;
     const codigo = siguienteCodigoCliente();
     const info = db
-      .prepare('INSERT INTO clientes (codigo, nombre, tipo, contacto, zona) VALUES (?,?,?,?,?)')
-      .run(codigo, nombre, tipo, contacto ?? null, zona ?? null);
+      .prepare('INSERT INTO clientes (codigo, nombre, tipo, contacto, zona, email) VALUES (?,?,?,?,?,?)')
+      .run(codigo, nombre, tipo, contacto ?? null, zona ?? null, email ?? null);
     const row = db.prepare('SELECT * FROM clientes WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(row);
   } catch (err) {
@@ -351,6 +353,7 @@ const EXPORTABLE = {
   gastos_fijos: 'SELECT * FROM gastos_fijos',
   tickets: 'SELECT * FROM tickets',
   cuenta_corriente_movimientos: 'SELECT * FROM cuenta_corriente_movimientos',
+  auditoria: 'SELECT * FROM auditoria ORDER BY fecha DESC',
 };
 function toCsv(rows) {
   if (rows.length === 0) return '';
@@ -367,6 +370,9 @@ function toCsv(rows) {
 api.get('/export/:tabla', (req, res) => {
   const query = EXPORTABLE[req.params.tabla];
   if (!query) return res.status(404).json({ error: 'Tabla no exportable' });
+  if (req.params.tabla === 'auditoria' && req.session.rol !== 'admin') {
+    return res.status(403).json({ error: 'Esta accion es solo para el administrador' });
+  }
   const rows = db.prepare(query).all();
   const csv = toCsv(rows);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -438,4 +444,13 @@ api.delete('/usuarios/:id', requireAdmin, (req, res) => {
   const info = db.prepare('DELETE FROM usuarios WHERE id = ?').run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: 'No encontrado' });
   res.status(204).end();
+});
+
+// --- Auditoria (solo administrador): que hizo cada usuario ---
+api.get('/auditoria', requireAdmin, (req, res) => {
+  const { usuario } = req.query;
+  const rows = usuario
+    ? db.prepare('SELECT * FROM auditoria WHERE usuario = ? ORDER BY fecha DESC LIMIT 300').all(usuario)
+    : db.prepare('SELECT * FROM auditoria ORDER BY fecha DESC LIMIT 300').all();
+  res.json(rows);
 });

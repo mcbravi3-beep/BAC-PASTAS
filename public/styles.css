@@ -38,6 +38,9 @@ body {
 }
 .sidebar a:hover { background: var(--bg); }
 .sidebar a.active { background: var(--brand); color: #fff; }
+.sidebar a.nav-highlight { font-weight: 700; background: #fdf1e3; border-left: 4px solid var(--brand); margin-bottom: 6px; }
+.sidebar a.nav-highlight:hover { background: #fbe6cf; }
+.sidebar a.nav-highlight.active { background: var(--brand); color: #fff; border-left-color: var(--brand-dark); }
 .content { flex: 1; padding: 24px 32px; max-width: 1100px; }
 h2 { margin-top: 0; }
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
@@ -76,6 +79,16 @@ input, select {
 }
 .actions-cell { display: flex; gap: 6px; }
 .actions-cell button { padding: 4px 8px; font-size: 0.78rem; }
+
+.autocomplete { position: relative; }
+.autocomplete-list {
+  position: absolute; top: calc(100% + 2px); left: 0; z-index: 20;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12); min-width: 220px; max-height: 220px; overflow-y: auto;
+}
+.autocomplete-item { padding: 8px 10px; cursor: pointer; font-size: 0.88rem; }
+.autocomplete-item:hover { background: var(--bg); }
+.autocomplete-empty { padding: 8px 10px; font-size: 0.85rem; color: var(--muted); font-style: italic; }
 .alert-list { list-style: none; padding: 0; margin: 0; }
 .alert-list li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
 .alert-list li:last-child { border-bottom: none; }

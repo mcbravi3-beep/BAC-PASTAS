@@ -158,10 +158,11 @@ const sections = {
       { key: 'tipo', label: 'Tipo', type: 'options', options: ['particular', 'mayorista', 'revendedor'] },
       { key: 'contacto', label: 'Contacto' },
       { key: 'zona', label: 'Zona' },
+      { key: 'email', label: 'Email', type: 'email' },
     ],
     columns: [
       { key: 'codigo', label: 'Cod.' }, { key: 'nombre', label: 'Nombre' }, { key: 'tipo', label: 'Tipo' },
-      { key: 'contacto', label: 'Contacto' }, { key: 'zona', label: 'Zona' },
+      { key: 'contacto', label: 'Contacto' }, { key: 'zona', label: 'Zona' }, { key: 'email', label: 'Email' },
       { label: 'Total comprado', render: (r) => money(r.totalComprado) },
       { label: 'Saldo cta. cte.', render: (r) => r.saldoCuentaCorriente > 0 ? `<span class="badge warn">${money(r.saldoCuentaCorriente)}</span>` : money(r.saldoCuentaCorriente) },
     ],
@@ -350,7 +351,11 @@ async function renderVentas(container) {
       <form class="card" id="form-ticket">
         <div class="toolbar">
           <label>Cliente
-            <select name="cliente_id"><option value="">Consumidor final</option>${clientes.map((c) => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select>
+            <div class="autocomplete" id="cliente-autocomplete">
+              <input type="text" id="cliente-buscar" autocomplete="off" placeholder="Consumidor final (escribi para buscar)">
+              <input type="hidden" name="cliente_id" value="">
+              <div class="autocomplete-list" id="cliente-lista" hidden></div>
+            </div>
           </label>
           <label>Tipo de pago
             <select name="tipo_pago">
@@ -370,7 +375,7 @@ async function renderVentas(container) {
             <tr${p.precio_venta > 0 ? '' : ' style="opacity:0.5"'}>
               <td>${p.nombreCompleto}</td>
               <td>${p.precio_venta > 0 ? money(p.precio_venta) : '<span class="note">sin precio</span>'}</td>
-              <td><input type="number" min="0" step="0.01" data-producto="${p.id}" data-precio="${p.precio_venta}" placeholder="0" style="width:80px" ${p.precio_venta > 0 ? '' : 'disabled title="Este producto todavia no tiene precio de venta cargado"'}></td>
+              <td><input type="number" min="0" step="1" data-producto="${p.id}" data-precio="${p.precio_venta}" placeholder="0" style="width:80px" ${p.precio_venta > 0 ? '' : 'disabled title="Este producto todavia no tiene precio de venta cargado"'}></td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -390,6 +395,35 @@ async function renderVentas(container) {
     const formaPagoWrap = container.querySelector('#forma-pago-wrap');
     const qtyInputs = [...form.querySelectorAll('input[data-producto]')];
     const totalPreview = container.querySelector('#ticket-total-preview');
+
+    // Buscador predictivo de cliente: escribe cualquier parte del nombre,
+    // no solo la primera letra (un <select> nativo no permite eso).
+    const clienteInput = form.querySelector('#cliente-buscar');
+    const clienteHidden = form.elements.cliente_id;
+    const clienteLista = form.querySelector('#cliente-lista');
+    function renderClienteOpciones(filtro) {
+      const term = filtro.trim().toLowerCase();
+      const matches = term === '' ? clientes.slice(0, 8) : clientes.filter((c) => c.nombre.toLowerCase().includes(term)).slice(0, 8);
+      clienteLista.innerHTML = matches.length
+        ? matches.map((c) => `<div class="autocomplete-item" data-id="${c.id}" data-nombre="${c.nombre}">${c.nombre}${c.codigo ? ` <span class="note">(${c.codigo})</span>` : ''}</div>`).join('')
+        : `<div class="autocomplete-empty">Sin coincidencias</div>`;
+      clienteLista.hidden = false;
+    }
+    clienteInput.addEventListener('focus', () => renderClienteOpciones(clienteInput.value));
+    clienteInput.addEventListener('input', () => {
+      clienteHidden.value = '';
+      renderClienteOpciones(clienteInput.value);
+    });
+    clienteInput.addEventListener('blur', () => {
+      setTimeout(() => { clienteLista.hidden = true; }, 150);
+    });
+    clienteLista.addEventListener('mousedown', (e) => {
+      const item = e.target.closest('.autocomplete-item');
+      if (!item) return;
+      clienteHidden.value = item.dataset.id;
+      clienteInput.value = item.dataset.nombre;
+      clienteLista.hidden = true;
+    });
 
     function updateTotal() {
       const total = qtyInputs.reduce((acc, inp) => acc + (Number(inp.value) || 0) * Number(inp.dataset.precio), 0);
@@ -762,6 +796,36 @@ async function renderUsuarios(container) {
   load();
 }
 
+// ---------- Auditoria (solo administrador) ----------
+async function renderAuditoria(container) {
+  async function load(filtroUsuario = '') {
+    let registros;
+    try {
+      registros = await api.get(`auditoria${filtroUsuario ? `?usuario=${encodeURIComponent(filtroUsuario)}` : ''}`);
+    } catch (err) {
+      container.innerHTML = `<p class="result-msg error">${err.message}</p>`;
+      return;
+    }
+    const usuariosVistos = [...new Set(registros.map((r) => r.usuario))].sort();
+    container.innerHTML = `
+      <h2>Auditoria</h2>
+      <p class="note">Registro automatico de lo que hizo cada usuario (altas, ediciones y bajas). Se guarda solo, no hay que cargar nada acá. Se muestran los ultimos 300 movimientos.</p>
+      <div class="toolbar">
+        <label>Filtrar por usuario
+          <select id="filtro-usuario">
+            <option value="">Todos</option>
+            ${usuariosVistos.map((u) => `<option value="${u}" ${u === filtroUsuario ? 'selected' : ''}>${u}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <table><thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Rol</th><th>Accion</th></tr></thead>
+      <tbody>${registros.map((r) => `<tr><td>${new Date(r.fecha).toLocaleString('es-AR')}</td><td>${r.usuario}</td><td>${r.rol || ''}</td><td>${r.descripcion}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Sin movimientos registrados todavia.</td></tr>'}</tbody></table>
+    `;
+    container.querySelector('#filtro-usuario').onchange = (e) => load(e.target.value);
+  }
+  load();
+}
+
 // ---------- Export buttons (added to catalog/finance pages) ----------
 function addExportButton(container, table) {
   const btn = el(`<a class="btn secondary" href="/api/export/${table}">Exportar CSV</a>`);
@@ -787,10 +851,11 @@ const routes = {
   deudores: renderDeudores,
   backup: renderBackup,
   usuarios: renderUsuarios,
+  auditoria: renderAuditoria,
 };
 // 'ventas' y 'deudores' arman su propio toolbar (formulario de ticket / cuenta
 // corriente), asi que no reciben el boton de exportacion generico.
-const exportable = { productos: 'productos', insumos: 'insumos', produccion: 'produccion', inventario: 'inventario_insumos', clientes: 'clientes', proveedores: 'proveedores', gastos: 'gastos_fijos', costeo: 'costeo_estandar', recetas: 'recetas_bom' };
+const exportable = { productos: 'productos', insumos: 'insumos', produccion: 'produccion', inventario: 'inventario_insumos', clientes: 'clientes', proveedores: 'proveedores', gastos: 'gastos_fijos', costeo: 'costeo_estandar', recetas: 'recetas_bom', auditoria: 'auditoria' };
 
 async function router() {
   const hash = location.hash.replace('#/', '') || 'dashboard';
