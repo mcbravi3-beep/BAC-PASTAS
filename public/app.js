@@ -289,7 +289,7 @@ async function renderProduccion(container) {
       <p class="note">Al registrar una produccion se calcula el costo (ficha estandar o receta BOM) y se descuentan automaticamente los insumos usados segun la receta.</p>
       <form class="inline-form" id="form-prod">
         <label>Producto <select name="producto_id">${productos.map((p) => `<option value="${p.id}">${p.nombreCompleto}</option>`).join('')}</select></label>
-        <label>Cantidad <input name="cantidad" type="number" step="0.01" required></label>
+        <label>Cantidad <input name="cantidad" type="number" step="1" min="1" required></label>
         <label>Fecha <input name="fecha" type="date" value="${todayISO()}"></label>
         <button type="submit">Registrar produccion</button>
       </form>
