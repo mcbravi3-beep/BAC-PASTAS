@@ -43,13 +43,56 @@ async function renderCrud(container, cfg) {
   if (cfg.refs) {
     for (const r of cfg.refs) refs[r.name] = await api.get(r.api);
   }
+  let currentRows = [];
 
   async function load(msgHtml = '') {
-    const rows = await api.get(cfg.api);
+    currentRows = await api.get(cfg.api);
+    mostrar(buildForm(), currentRows, msgHtml);
+  }
+
+  function mostrar(formEl, rows, msgHtml = '') {
     body.innerHTML = '';
-    body.appendChild(buildForm());
+    if (cfg.buscar) body.appendChild(buildBuscador());
+    body.appendChild(formEl);
     body.appendChild(el(`<div id="crud-msg">${msgHtml}</div>`));
     body.appendChild(buildTable(rows));
+  }
+
+  function mostrarEdicion(row) {
+    mostrar(buildForm(row), currentRows);
+  }
+
+  // Buscador predictivo opcional (cfg.buscar: ['codigo','nombre']): escribis
+  // un codigo o nombre ya existente y entra directo en modo edicion con
+  // todos los campos autocompletados, sin tener que buscar la fila abajo.
+  function buildBuscador() {
+    const wrapper = el(`
+      <div class="autocomplete" style="margin-bottom:12px;max-width:360px">
+        <input type="text" id="crud-buscar" autocomplete="off" placeholder="Buscar por ${cfg.buscar.map((k) => cfg.fields.find((f) => f.key === k)?.label || k).join(' o ')} para modificar...">
+        <div class="autocomplete-list" id="crud-buscar-lista" hidden></div>
+      </div>
+    `);
+    const input = wrapper.querySelector('#crud-buscar');
+    const lista = wrapper.querySelector('#crud-buscar-lista');
+    function render(term) {
+      const t = term.trim().toLowerCase();
+      if (t === '') { lista.hidden = true; return; }
+      const matches = currentRows.filter((r) => cfg.buscar.some((k) => String(r[k] ?? '').toLowerCase().includes(t))).slice(0, 8);
+      lista.innerHTML = matches.length
+        ? matches.map((r) => `<div class="autocomplete-item" data-id="${r.id}">${cfg.buscar.map((k) => r[k]).filter(Boolean).join(' - ')}</div>`).join('')
+        : `<div class="autocomplete-empty">Sin coincidencias</div>`;
+      lista.hidden = false;
+    }
+    input.addEventListener('input', () => render(input.value));
+    input.addEventListener('focus', () => { if (input.value) render(input.value); });
+    input.addEventListener('blur', () => setTimeout(() => { lista.hidden = true; }, 150));
+    lista.addEventListener('mousedown', (e) => {
+      const item = e.target.closest('.autocomplete-item');
+      if (!item) return;
+      const row = currentRows.find((r) => r.id === Number(item.dataset.id));
+      if (row) mostrarEdicion(row);
+    });
+    return wrapper;
   }
 
   function optionsFor(field) {
@@ -79,7 +122,7 @@ async function renderCrud(container, cfg) {
       wrap.appendChild(input);
       form.appendChild(wrap);
     }
-    const submit = el(`<button type="submit">${editRow ? 'Guardar cambios' : 'Agregar'}</button>`);
+    const submit = el(`<button type="submit">${editRow ? (cfg.editLabel || 'Guardar cambios') : 'Agregar'}</button>`);
     form.appendChild(submit);
     if (editRow) {
       const cancel = el(`<button type="button" class="secondary">Cancelar</button>`);
@@ -114,12 +157,8 @@ async function renderCrud(container, cfg) {
       tr.innerHTML = cfg.columns.map((c) => `<td>${c.render ? c.render(row) : (row[c.key] ?? '')}</td>`).join('');
       const actionsTd = document.createElement('td');
       actionsTd.className = 'actions-cell';
-      const editBtn = el(`<button class="secondary">Editar</button>`);
-      editBtn.onclick = () => {
-        body.innerHTML = '';
-        body.appendChild(buildForm(row));
-        body.appendChild(buildTable(rows));
-      };
+      const editBtn = el(`<button class="secondary">${cfg.editLabel || 'Editar'}</button>`);
+      editBtn.onclick = () => mostrarEdicion(row);
       const delBtn = el(`<button class="danger">Eliminar</button>`);
       delBtn.onclick = async () => {
         if (!confirm('Eliminar este registro?')) return;
@@ -190,6 +229,8 @@ const sections = {
   },
   productos: {
     title: 'Productos', api: 'productos',
+    buscar: ['codigo', 'nombre'],
+    editLabel: 'Modificar',
     fields: [
       { key: 'codigo', label: 'Codigo' },
       { key: 'nombre', label: 'Nombre (sabor)' },
@@ -594,27 +635,128 @@ async function renderCosteo(container) {
 }
 
 // ---------- Recetas BOM ----------
+// Unidades estandar permitidas al cargar un ingrediente de receta (sin "cucharadas": no es una medida precisa y estandarizable).
+const UNIDADES_RECETA = ['gramos', 'kilogramos', 'mililitros', 'litros', 'unidades'];
+
+const UNIDADES_MASA = { g: 1, gr: 1, grs: 1, gramo: 1, gramos: 1, kg: 1000, kilo: 1000, kilos: 1000, kilogramo: 1000, kilogramos: 1000 };
+const UNIDADES_VOLUMEN = { ml: 1, mililitro: 1, mililitros: 1, l: 1000, litro: 1000, litros: 1000 };
+const UNIDADES_CONTEO = { unidad: 1, unidades: 1, u: 1, un: 1 };
+
+function normalizarUnidad(u) {
+  const key = (u || '').toString().trim().toLowerCase();
+  if (key in UNIDADES_MASA) return { tipo: 'masa', factor: UNIDADES_MASA[key] };
+  if (key in UNIDADES_VOLUMEN) return { tipo: 'volumen', factor: UNIDADES_VOLUMEN[key] };
+  if (key in UNIDADES_CONTEO) return { tipo: 'conteo', factor: UNIDADES_CONTEO[key] };
+  return { tipo: 'otro', key };
+}
+
+// Convierte `cantidad` (expresada en unidadOrigen, la de la receta) a la unidad en que se
+// mide el stock del insumo (unidadDestino), p.ej. gramos->kg o mililitros->litro. Devuelve
+// null si no se puede comparar (unidades de distinto tipo y que tampoco coinciden literalmente).
+function convertirAUnidadStock(cantidad, unidadOrigen, unidadDestino) {
+  const o = normalizarUnidad(unidadOrigen);
+  const d = normalizarUnidad(unidadDestino);
+  if (o.tipo === 'otro' || d.tipo === 'otro' || o.tipo !== d.tipo) {
+    return o.key === d.key ? cantidad : null;
+  }
+  return (cantidad * o.factor) / d.factor;
+}
+
 async function renderRecetas(container) {
   const [productos, insumos] = await Promise.all([api.get('productos'), api.get('insumos')]);
   let productoId = productos[0]?.id;
-  async function load() {
+  const insumoPorId = new Map(insumos.map((i) => [i.id, i]));
+
+  function abrirModalReplicar(rows, productoActual) {
+    const destinos = productos.filter((p) => p.id !== productoId);
+    const overlay = el(`
+      <div class="modal-overlay">
+        <div class="modal">
+          <h3>Replicar insumos en otros productos</h3>
+          <p class="note">Copia los ${rows.length} insumo(s) de la receta de <strong>${productoActual?.nombreCompleto}</strong> hacia los productos que selecciones.</p>
+          <label>Productos destino (podes elegir varios)</label>
+          <select id="modal-destinos" multiple>${destinos.map((p) => `<option value="${p.id}">${p.nombreCompleto}</option>`).join('')}</select>
+          <div class="field-group">
+            <label><input type="radio" name="modo-replicar" value="agregar" checked> Agregar sin duplicar (si el destino ya tiene algun insumo cargado, lo deja como esta)</label>
+            <label><input type="radio" name="modo-replicar" value="reemplazar"> Reemplazar (borra los insumos actuales del producto destino y pone estos)</label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" id="modal-cancelar">Cancelar</button>
+            <button type="button" id="modal-confirmar">Replicar</button>
+          </div>
+        </div>
+      </div>
+    `);
+    document.body.appendChild(overlay);
+    const cerrar = () => overlay.remove();
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) cerrar(); });
+    overlay.querySelector('#modal-cancelar').onclick = cerrar;
+    overlay.querySelector('#modal-confirmar').onclick = async () => {
+      const select = overlay.querySelector('#modal-destinos');
+      const destinoProductoIds = Array.from(select.selectedOptions).map((o) => Number(o.value));
+      if (destinoProductoIds.length === 0) { alert('Selecciona al menos un producto destino.'); return; }
+      const modo = overlay.querySelector('input[name=modo-replicar]:checked').value;
+      try {
+        const resultado = await api.post('recetas-bom/replicar', { origenProductoId: productoId, destinoProductoIds, modo });
+        cerrar();
+        load(`<p class="result-msg ok">✅ Se copiaron ${resultado.totalCopiados} insumo(s) hacia ${destinoProductoIds.length} producto(s).</p>`);
+      } catch (err) { alert(err.message); }
+    };
+  }
+
+  async function load(msgHtml = '') {
     const rows = productoId ? await api.get(`recetas-bom?producto_id=${productoId}`) : [];
+    const productoActual = productos.find((p) => p.id === productoId);
+
+    // Cruce en tiempo real contra el stock de insumos: cuanto se necesita vs cuanto hay,
+    // convirtiendo la unidad de la receta a la unidad en que se mide el stock del insumo.
+    const filasConStock = rows.map((r) => {
+      const insumo = insumoPorId.get(r.insumo_id);
+      const unidadReceta = r.unidad || r.insumo_unidad;
+      const requeridoEnUnidadStock = insumo ? convertirAUnidadStock(r.cantidad_por_unidad, unidadReceta, insumo.unidad) : null;
+      const comparable = insumo && requeridoEnUnidadStock !== null;
+      const alcanza = !comparable || requeridoEnUnidadStock <= insumo.stockActual;
+      return { ...r, insumo, unidadReceta, requeridoEnUnidadStock, comparable, alcanza };
+    });
+    const faltantes = filasConStock.filter((f) => f.comparable && !f.alcanza);
+
     container.innerHTML = `
       <h2>Recetas (BOM)</h2>
       <p class="note">Receta insumo por insumo. Se usa para descontar stock en cada produccion, y como metodo de costeo de respaldo cuando el producto no tiene ficha de Costeo Estandar.</p>
       <div class="toolbar">
         <label>Producto: <select id="prod-sel">${productos.map((p) => `<option value="${p.id}" ${p.id === productoId ? 'selected' : ''}>${p.nombreCompleto}</option>`).join('')}</select></label>
+        <button type="button" class="secondary" id="btn-replicar" ${rows.length === 0 ? 'disabled' : ''}>Replicar insumos en otros productos</button>
       </div>
+      ${rows.length === 0 ? '' : faltantes.length > 0
+        ? `<div class="alert-box warn">⚠️ <strong>Stock insuficiente:</strong> no alcanza para preparar esta receta con ${faltantes.length} de sus insumos. Hace clic en "No alcanza" en la tabla para ver el detalle.</div>`
+        : `<div class="alert-box ok">✅ Stock suficiente para preparar esta receta con los insumos disponibles.</div>`}
+      <div id="receta-msg">${msgHtml}</div>
       <form class="inline-form" id="form-receta">
-        <label>Insumo <select name="insumo_id">${insumos.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('')}</select></label>
+        <label>Insumo <select name="insumo_id">${insumos.map((i) => `<option value="${i.id}">${i.nombre} (stock en ${i.unidad})</option>`).join('')}</select></label>
         <label>Cantidad por unidad <input name="cantidad_por_unidad" type="number" step="0.0001" required></label>
-        <label>Unidad <input name="unidad" type="text" placeholder="kg"></label>
+        <label>Unidad <select name="unidad">${UNIDADES_RECETA.map((u) => `<option value="${u}">${u}</option>`).join('')}</select></label>
         <button type="submit">Agregar a la receta</button>
       </form>
-      <table><thead><tr><th>Insumo</th><th>Cantidad por unidad</th><th>Unidad</th><th>Costo insumo</th><th>Costo aportado</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => `<tr><td>${r.insumo_nombre}</td><td>${num(r.cantidad_por_unidad)}</td><td>${r.unidad || r.insumo_unidad}</td><td>${money(r.insumo_costo)}</td><td>${money(r.cantidad_por_unidad * r.insumo_costo)}</td><td><button class="danger" data-del="${r.id}">Eliminar</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin items en la receta.</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Insumo</th><th>Cantidad por unidad</th><th>Unidad</th><th>Costo insumo</th><th>Costo aportado</th><th>Stock</th><th></th></tr></thead>
+      <tbody>${filasConStock.map((r) => `<tr>
+          <td>${r.insumo_nombre}</td><td>${num(r.cantidad_por_unidad)}</td><td>${r.unidadReceta}</td>
+          <td>${money(r.insumo_costo)}</td><td>${money(r.cantidad_por_unidad * r.insumo_costo)}</td>
+          <td>${!r.comparable ? '<span class="note">sin verificar</span>' : r.alcanza ? '<span class="badge ok">OK</span>' : `<button type="button" class="badge warn" data-stock-detalle="${r.id}">⚠️ No alcanza</button>`}</td>
+          <td><button class="danger" data-del="${r.id}">Eliminar</button></td>
+        </tr>${r.comparable && !r.alcanza ? `<tr class="detalle-stock" id="detalle-${r.id}" hidden><td colspan="7"><span class="note">Requiere ${num(r.requeridoEnUnidadStock)} ${r.insumo.unidad} — Stock disponible: ${num(r.insumo.stockActual)} ${r.insumo.unidad} — Faltan ${num(r.requeridoEnUnidadStock - r.insumo.stockActual)} ${r.insumo.unidad}</span></td></tr>` : ''}`).join('') || '<tr><td colspan="7" class="empty">Sin items en la receta.</td></tr>'}</tbody></table>
+
+      <div class="card">
+        <h3>Comentarios / Tips de preparacion</h3>
+        <p class="note">Notas clave para estandarizar la preparacion de esta receta (tiempos, puntos de coccion, armado del relleno, etc). Se guardan junto con el producto.</p>
+        <textarea id="notas-receta" rows="4" placeholder="Ej: amasar hasta que no se pegue en las manos, dejar reposar 20 min...">${productoActual?.notas_receta || ''}</textarea>
+        <div class="toolbar" style="margin-top:8px">
+          <button type="button" id="btn-guardar-notas">Guardar comentarios</button>
+          <span id="notas-msg" class="note"></span>
+        </div>
+      </div>
     `;
     container.querySelector('#prod-sel').onchange = (e) => { productoId = Number(e.target.value); load(); };
+    container.querySelector('#btn-replicar').onclick = () => abrirModalReplicar(rows, productoActual);
     container.querySelector('#form-receta').onsubmit = async (e) => {
       e.preventDefault();
       const f = e.target;
@@ -635,6 +777,23 @@ async function renderRecetas(container) {
         load();
       };
     });
+    container.querySelectorAll('[data-stock-detalle]').forEach((btn) => {
+      btn.onclick = () => {
+        const fila = container.querySelector(`#detalle-${btn.dataset.stockDetalle}`);
+        if (fila) fila.hidden = !fila.hidden;
+      };
+    });
+    container.querySelector('#btn-guardar-notas').onclick = async () => {
+      const notas = container.querySelector('#notas-receta').value;
+      const msgSpan = container.querySelector('#notas-msg');
+      try {
+        await api.put(`productos/${productoId}`, { notas_receta: notas });
+        if (productoActual) productoActual.notas_receta = notas;
+        msgSpan.textContent = `✅ Guardado (${new Date().toLocaleTimeString('es-AR')})`;
+      } catch (err) {
+        msgSpan.textContent = '❌ ' + err.message;
+      }
+    };
   }
   load();
 }

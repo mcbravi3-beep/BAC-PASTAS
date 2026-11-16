@@ -84,7 +84,7 @@ api.get('/insumos/:id', (req, res) => {
 api.use('/insumos', crudRouter('insumos', insumosFields, { orderBy: 'nombre' }));
 
 // --- Productos (con costo unitario, margen y stock calculados) ---
-const productosFields = ['codigo', 'nombre', 'categoria', 'unidad_venta', 'precio_venta', 'stock_inicial', 'stock_minimo', 'activo'];
+const productosFields = ['codigo', 'nombre', 'categoria', 'unidad_venta', 'precio_venta', 'stock_inicial', 'stock_minimo', 'activo', 'notas_receta'];
 function serializeProducto(p) {
   const { costoUnitario, origen } = costoUnitarioProducto(p.id);
   const stockActual = stockProductoTerminado(p.id);
@@ -173,6 +173,59 @@ api.get('/recetas-bom', (req, res) => {
     )
     .all(...params);
   res.json(rows);
+});
+
+// Replicar los insumos de la receta de un producto hacia otros productos,
+// para no tener que cargarlos a mano de nuevo. modo 'agregar' no duplica
+// insumos que el destino ya tenga; 'reemplazar' borra lo que el destino
+// tenia cargado y pone una copia exacta del origen.
+api.post('/recetas-bom/replicar', (req, res) => {
+  try {
+    const { origenProductoId, destinoProductoIds, modo } = req.body;
+    if (!origenProductoId || !Array.isArray(destinoProductoIds) || destinoProductoIds.length === 0) {
+      return res.status(400).json({ error: 'Falta el producto de origen o los productos destino' });
+    }
+    const origenItems = db
+      .prepare('SELECT insumo_id, cantidad_por_unidad, unidad FROM recetas_bom WHERE producto_id = ?')
+      .all(origenProductoId);
+    if (origenItems.length === 0) {
+      return res.status(400).json({ error: 'El producto de origen no tiene insumos cargados en su receta' });
+    }
+    const insertar = db.prepare(
+      'INSERT INTO recetas_bom (producto_id, insumo_id, cantidad_por_unidad, unidad) VALUES (?,?,?,?)'
+    );
+    const borrarDestino = db.prepare('DELETE FROM recetas_bom WHERE producto_id = ?');
+    const existentesDestino = db.prepare('SELECT insumo_id FROM recetas_bom WHERE producto_id = ?');
+
+    let totalCopiados = 0;
+    db.exec('BEGIN');
+    try {
+      for (const destinoId of destinoProductoIds) {
+        if (Number(destinoId) === Number(origenProductoId)) continue;
+        if (modo === 'reemplazar') {
+          borrarDestino.run(destinoId);
+          for (const item of origenItems) {
+            insertar.run(destinoId, item.insumo_id, item.cantidad_por_unidad, item.unidad);
+            totalCopiados += 1;
+          }
+        } else {
+          const yaTiene = new Set(existentesDestino.all(destinoId).map((r) => r.insumo_id));
+          for (const item of origenItems) {
+            if (yaTiene.has(item.insumo_id)) continue;
+            insertar.run(destinoId, item.insumo_id, item.cantidad_por_unidad, item.unidad);
+            totalCopiados += 1;
+          }
+        }
+      }
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    res.json({ ok: true, totalCopiados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 api.use('/recetas-bom', crudRouter('recetas_bom', ['producto_id', 'insumo_id', 'cantidad_por_unidad', 'unidad']));
 

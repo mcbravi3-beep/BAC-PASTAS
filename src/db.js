@@ -14,10 +14,30 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 export const dbPath = join(dataDir, 'pastas.db');
 const schemaPath = join(__dirname, 'schema.sql');
 
+// Migraciones idempotentes: cambios de esquema que se aplican sobre una base
+// que ya existe y ya tiene datos reales (no se puede simplemente recrear la
+// tabla). Cada sentencia se intenta una sola vez por columna/indice nuevo;
+// si ya estaba aplicada de una corrida anterior, el error "duplicate column"
+// (o "already exists") se ignora a proposito.
+const MIGRACIONES = [
+  "ALTER TABLE productos ADD COLUMN notas_receta TEXT",
+];
+
+function aplicarMigraciones(instance) {
+  for (const sql of MIGRACIONES) {
+    try {
+      instance.exec(sql);
+    } catch (err) {
+      if (!/duplicate column name|already exists/i.test(err.message)) throw err;
+    }
+  }
+}
+
 function open() {
   const instance = new DatabaseSync(dbPath);
   instance.exec('PRAGMA foreign_keys = ON;');
   instance.exec(readFileSync(schemaPath, 'utf8'));
+  aplicarMigraciones(instance);
   return instance;
 }
 

@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS productos (
   precio_venta REAL NOT NULL DEFAULT 0,
   stock_inicial REAL NOT NULL DEFAULT 0,
   stock_minimo REAL NOT NULL DEFAULT 0,
-  activo INTEGER NOT NULL DEFAULT 1
+  activo INTEGER NOT NULL DEFAULT 1,
+  notas_receta TEXT
 );
 
 CREATE TABLE IF NOT EXISTS costeo_estandar (
