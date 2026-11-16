@@ -2,10 +2,16 @@ services:
   - type: web
     name: bac-pastas
     runtime: node
-    plan: free
+    plan: starter
     branch: claude/pasta-factory-management-system-moecdp
     buildCommand: npm install
     startCommand: npm start
+    disk:
+      name: datos-pastas
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 22.22.2
+      - key: DATA_DIR
+        value: /var/data

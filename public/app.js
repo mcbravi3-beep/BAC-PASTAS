@@ -44,10 +44,11 @@ async function renderCrud(container, cfg) {
     for (const r of cfg.refs) refs[r.name] = await api.get(r.api);
   }
 
-  async function load() {
+  async function load(msgHtml = '') {
     const rows = await api.get(cfg.api);
     body.innerHTML = '';
     body.appendChild(buildForm());
+    body.appendChild(el(`<div id="crud-msg">${msgHtml}</div>`));
     body.appendChild(buildTable(rows));
   }
 
@@ -95,7 +96,7 @@ async function renderCrud(container, cfg) {
       try {
         if (editRow) await api.put(`${cfg.api}/${editRow.id}`, data);
         else await api.post(cfg.api, data);
-        load();
+        load(`<p class="result-msg ok">✅ Guardado correctamente (${new Date().toLocaleTimeString('es-AR')}).</p>`);
       } catch (err) {
         alert(err.message);
       }
