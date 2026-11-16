@@ -539,6 +539,7 @@ async function renderCosteo(container) {
         <label>Costo insumos masa <input name="costo_insumos_masa" type="number" step="0.01"></label>
         <label>Costo insumos relleno <input name="costo_insumos_relleno" type="number" step="0.01"></label>
         <button type="submit">Guardar ficha</button>
+        <span class="note" id="costeo-autoguardado"></span>
       </form>
       <div id="costeo-msg">${msgHtml}</div>
       <table><thead><tr><th>Producto</th><th>Porciones</th><th>Costo M.O.</th><th>Costo insumos</th><th>Costo unitario</th><th>Actualizado</th><th></th></tr></thead>
@@ -551,13 +552,31 @@ async function renderCosteo(container) {
         <td><button class="danger" data-del="${r.producto_id}">Eliminar</button></td>
       </tr>`).join('') || '<tr><td colspan="7" class="empty">Sin fichas cargadas.</td></tr>'}</tbody></table>
     `;
-    container.querySelector('#form-costeo').onsubmit = async (e) => {
-      e.preventDefault();
-      const f = e.target;
+    const formCosteo = container.querySelector('#form-costeo');
+    const autoguardadoMsg = container.querySelector('#costeo-autoguardado');
+    function datosFormulario() {
       const data = {};
-      for (const el of f.elements) if (el.name) data[el.name] = el.type === 'number' ? Number(el.value || 0) : el.value;
+      for (const el of formCosteo.elements) if (el.name) data[el.name] = el.type === 'number' ? Number(el.value || 0) : el.value;
+      return data;
+    }
+    // Autoguardado: mientras vas completando los campos de esta ficha (puede
+    // llevar un rato), cada vez que salis de un campo numerico se guarda solo
+    // en el servidor -- no hace falta llegar al final ni tocar "Guardar ficha"
+    // para no perder lo que ya cargaste.
+    formCosteo.querySelectorAll('input[type=number]').forEach((inp) => {
+      inp.addEventListener('blur', async () => {
+        try {
+          await api.post('costeo-estandar', datosFormulario());
+          autoguardadoMsg.textContent = `💾 Autoguardado ${new Date().toLocaleTimeString('es-AR')}`;
+        } catch (err) {
+          autoguardadoMsg.textContent = `No se pudo autoguardar: ${err.message}`;
+        }
+      });
+    });
+    formCosteo.onsubmit = async (e) => {
+      e.preventDefault();
       try {
-        await api.post('costeo-estandar', data);
+        await api.post('costeo-estandar', datosFormulario());
         load(`<p class="result-msg ok">Ficha guardada.</p>`);
       } catch (err) {
         load(`<p class="result-msg error">${err.message}</p>`);
