@@ -21,6 +21,10 @@ const schemaPath = join(__dirname, 'schema.sql');
 // (o "already exists") se ignora a proposito.
 const MIGRACIONES = [
   "ALTER TABLE productos ADD COLUMN notas_receta TEXT",
+  "ALTER TABLE productos ADD COLUMN porciones_receta REAL NOT NULL DEFAULT 1",
+  "ALTER TABLE productos ADD COLUMN precio_venta_mayorista REAL NOT NULL DEFAULT 0",
+  "ALTER TABLE productos ADD COLUMN precio_venta_minorista REAL NOT NULL DEFAULT 0",
+  "ALTER TABLE clientes ADD COLUMN categoria TEXT CHECK (categoria IN ('mayorista','minorista'))",
 ];
 
 function aplicarMigraciones(instance) {
@@ -33,11 +37,35 @@ function aplicarMigraciones(instance) {
   }
 }
 
+// Backfills idempotentes: completan datos derivados de columnas nuevas sobre
+// filas que ya existian antes de la migracion. Cada uno se protege con su
+// propio WHERE para poder correr en cada arranque sin pisar datos ya
+// cargados a mano. En una base recien creada algunas columnas viejas
+// (p.ej. "precio_venta") ya no existen: el error "no such column" tambien
+// se ignora a proposito.
+const BACKFILLS = [
+  `UPDATE productos SET precio_venta_mayorista = precio_venta, precio_venta_minorista = precio_venta
+   WHERE precio_venta_mayorista = 0 AND precio_venta_minorista = 0 AND precio_venta > 0`,
+  `UPDATE clientes SET categoria = CASE WHEN tipo = 'mayorista' THEN 'mayorista' ELSE 'minorista' END
+   WHERE categoria IS NULL`,
+];
+
+function aplicarBackfills(instance) {
+  for (const sql of BACKFILLS) {
+    try {
+      instance.exec(sql);
+    } catch (err) {
+      if (!/no such column/i.test(err.message)) throw err;
+    }
+  }
+}
+
 function open() {
   const instance = new DatabaseSync(dbPath);
   instance.exec('PRAGMA foreign_keys = ON;');
   instance.exec(readFileSync(schemaPath, 'utf8'));
   aplicarMigraciones(instance);
+  aplicarBackfills(instance);
   return instance;
 }
 

@@ -2,25 +2,12 @@
 import { db } from './db.js';
 
 /**
- * Costo unitario de un producto.
- * Metodo principal: ficha de Costeo_Estandar (costo del lote / porciones).
- * Metodo de respaldo: suma de Recetas_BOM (cantidad x costo de cada insumo).
- * Devuelve { costoUnitario, origen } donde origen es 'estandar' | 'bom' | 'sin_datos'.
+ * Costo de insumos por porcion segun la receta (Recetas/BOM) de un producto:
+ * suma cantidad x costo de cada insumo cargado y lo divide por la cantidad
+ * de porciones que rinde esa receta (productos.porciones_receta). Devuelve
+ * null si el producto no tiene ningun insumo cargado en su receta.
  */
-export function costoUnitarioProducto(productoId) {
-  const ficha = db
-    .prepare('SELECT * FROM costeo_estandar WHERE producto_id = ?')
-    .get(productoId);
-
-  if (ficha) {
-    const horasTotales =
-      ficha.horas_armado + ficha.horas_masa + ficha.horas_relleno + ficha.horas_empaquetado;
-    const costoManoObra = horasTotales * ficha.personas * ficha.costo_hora_mano_obra;
-    const costoTotalLote = ficha.costo_insumos_masa + ficha.costo_insumos_relleno + costoManoObra;
-    const costoUnitario = ficha.porciones_por_lote > 0 ? costoTotalLote / ficha.porciones_por_lote : 0;
-    return { costoUnitario, origen: 'estandar', detalle: { costoTotalLote, costoManoObra, porciones: ficha.porciones_por_lote } };
-  }
-
+export function costoPorPorcionBOM(productoId) {
   const bom = db
     .prepare(
       `SELECT r.cantidad_por_unidad, i.costo_unitario AS costo_insumo
@@ -28,10 +15,45 @@ export function costoUnitarioProducto(productoId) {
        WHERE r.producto_id = ?`
     )
     .all(productoId);
+  if (bom.length === 0) return null;
 
-  if (bom.length > 0) {
-    const costoUnitario = bom.reduce((acc, r) => acc + r.cantidad_por_unidad * r.costo_insumo, 0);
-    return { costoUnitario, origen: 'bom', detalle: { items: bom.length } };
+  const costoTotalIngredientes = bom.reduce((acc, r) => acc + r.cantidad_por_unidad * r.costo_insumo, 0);
+  const producto = db.prepare('SELECT porciones_receta FROM productos WHERE id = ?').get(productoId);
+  const porciones = producto?.porciones_receta > 0 ? producto.porciones_receta : 1;
+  return { costoTotalIngredientes, porciones, costoPorPorcion: costoTotalIngredientes / porciones, items: bom.length };
+}
+
+/**
+ * Costo unitario de un producto.
+ * Metodo principal: ficha de Costeo_Estandar. El costo de insumos (masa +
+ * relleno) ya no se carga a mano: se toma del costo por porcion de la
+ * receta (costoPorPorcionBOM). El costo de mano de obra se calcula sobre
+ * el lote y se divide por porciones_por_lote.
+ * Metodo de respaldo (sin ficha): costo por porcion de la receta solo.
+ * Devuelve { costoUnitario, origen } donde origen es 'estandar' | 'bom' | 'sin_datos'.
+ */
+export function costoUnitarioProducto(productoId) {
+  const ficha = db
+    .prepare('SELECT * FROM costeo_estandar WHERE producto_id = ?')
+    .get(productoId);
+  const bomInfo = costoPorPorcionBOM(productoId);
+
+  if (ficha) {
+    const horasTotales =
+      ficha.horas_armado + ficha.horas_masa + ficha.horas_relleno + ficha.horas_empaquetado;
+    const costoManoObraTotal = horasTotales * ficha.personas * ficha.costo_hora_mano_obra;
+    const costoManoObraPorPorcion = ficha.porciones_por_lote > 0 ? costoManoObraTotal / ficha.porciones_por_lote : 0;
+    const costoInsumosPorPorcion = bomInfo ? bomInfo.costoPorPorcion : 0;
+    const costoUnitario = costoInsumosPorPorcion + costoManoObraPorPorcion;
+    return {
+      costoUnitario,
+      origen: 'estandar',
+      detalle: { costoManoObraTotal, costoManoObraPorPorcion, costoInsumosPorPorcion, porciones: ficha.porciones_por_lote },
+    };
+  }
+
+  if (bomInfo) {
+    return { costoUnitario: bomInfo.costoPorPorcion, origen: 'bom', detalle: { items: bomInfo.items } };
   }
 
   return { costoUnitario: 0, origen: 'sin_datos', detalle: null };
@@ -109,10 +131,13 @@ export function registrarProduccion({ productoId, cantidad, fecha }) {
 export function registrarVenta({ clienteId, productoId, cantidad, precioUnitario, formaPago, fecha, ticketId }) {
   if (!(cantidad > 0)) throw new Error('La cantidad vendida debe ser mayor a 0');
 
-  const producto = db.prepare('SELECT precio_venta FROM productos WHERE id = ?').get(productoId);
+  const producto = db.prepare('SELECT precio_venta_mayorista, precio_venta_minorista FROM productos WHERE id = ?').get(productoId);
   if (!producto) throw new Error('Producto inexistente');
 
-  const precio = precioUnitario ?? producto.precio_venta;
+  // El precio deberia venir siempre explicito desde la pantalla de Ventas
+  // (ya resuelto segun la categoria del cliente o la eleccion manual). Si no
+  // llega, se usa el precio minorista como respaldo conservador.
+  const precio = precioUnitario ?? producto.precio_venta_minorista;
   const { costoUnitario } = costoUnitarioProducto(productoId);
   const subtotal = cantidad * precio;
   const costoTotal = cantidad * costoUnitario;

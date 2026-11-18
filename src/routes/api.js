@@ -7,6 +7,7 @@ import { requireAdmin, hashClave } from '../auth.js';
 import { auditMiddleware } from '../auditoria.js';
 import {
   costoUnitarioProducto,
+  costoPorPorcionBOM,
   stockInsumo,
   stockProductoTerminado,
   registrarProduccion,
@@ -28,7 +29,7 @@ api.use('/proveedores', crudRouter('proveedores', ['codigo', 'nombre', 'insumos_
 
 // --- Clientes (CRUD simple + total comprado y saldo cuenta corriente calculados) ---
 // El codigo (C001, C002, ...) lo asigna el sistema solo: no se escribe a mano.
-const clientesBase = crudRouter('clientes', ['nombre', 'tipo', 'contacto', 'zona', 'email'], { orderBy: 'nombre' });
+const clientesBase = crudRouter('clientes', ['nombre', 'tipo', 'categoria', 'contacto', 'zona', 'email'], { orderBy: 'nombre' });
 function siguienteCodigoCliente() {
   const codigos = db.prepare("SELECT codigo FROM clientes WHERE codigo LIKE 'C%'").all();
   const max = codigos.reduce((acc, { codigo }) => {
@@ -44,11 +45,14 @@ api.get('/clientes', (req, res) => {
 });
 api.post('/clientes', (req, res) => {
   try {
-    const { nombre, tipo, contacto, zona, email } = req.body;
+    const { nombre, tipo, categoria, contacto, zona, email } = req.body;
+    if (!['mayorista', 'minorista'].includes(categoria)) {
+      return res.status(400).json({ error: 'La categoria del cliente es obligatoria: mayorista o minorista' });
+    }
     const codigo = siguienteCodigoCliente();
     const info = db
-      .prepare('INSERT INTO clientes (codigo, nombre, tipo, contacto, zona, email) VALUES (?,?,?,?,?,?)')
-      .run(codigo, nombre, tipo, contacto ?? null, zona ?? null, email ?? null);
+      .prepare('INSERT INTO clientes (codigo, nombre, tipo, categoria, contacto, zona, email) VALUES (?,?,?,?,?,?,?)')
+      .run(codigo, nombre, tipo, categoria, contacto ?? null, zona ?? null, email ?? null);
     const row = db.prepare('SELECT * FROM clientes WHERE id = ?').get(info.lastInsertRowid);
     res.status(201).json(row);
   } catch (err) {
@@ -84,7 +88,11 @@ api.get('/insumos/:id', (req, res) => {
 api.use('/insumos', crudRouter('insumos', insumosFields, { orderBy: 'nombre' }));
 
 // --- Productos (con costo unitario, margen y stock calculados) ---
-const productosFields = ['codigo', 'nombre', 'categoria', 'unidad_venta', 'precio_venta', 'stock_inicial', 'stock_minimo', 'activo', 'notas_receta'];
+const productosFields = [
+  'codigo', 'nombre', 'categoria', 'unidad_venta',
+  'precio_venta_mayorista', 'precio_venta_minorista',
+  'stock_inicial', 'stock_minimo', 'activo', 'notas_receta', 'porciones_receta',
+];
 function serializeProducto(p) {
   const { costoUnitario, origen } = costoUnitarioProducto(p.id);
   const stockActual = stockProductoTerminado(p.id);
@@ -93,7 +101,9 @@ function serializeProducto(p) {
     nombreCompleto: p.categoria ? `${p.categoria} - ${p.nombre}` : p.nombre,
     costoUnitario,
     origenCosteo: origen,
-    margen: p.precio_venta - costoUnitario,
+    costoInsumosPorPorcion: costoPorPorcionBOM(p.id)?.costoPorPorcion ?? 0,
+    margenMayorista: p.precio_venta_mayorista - costoUnitario,
+    margenMinorista: p.precio_venta_minorista - costoUnitario,
     stockActual,
     alertaStock: stockActual < p.stock_minimo,
   };
@@ -118,15 +128,25 @@ api.get('/costeo-estandar', (req, res) => {
     )
     .all();
   res.json(
-    rows.map((r) => ({ ...r, costoUnitarioCalculado: costoUnitarioProducto(r.producto_id).costoUnitario }))
+    rows.map((r) => ({
+      ...r,
+      costoUnitarioCalculado: costoUnitarioProducto(r.producto_id).costoUnitario,
+      costoInsumosPorPorcion: costoPorPorcionBOM(r.producto_id)?.costoPorPorcion ?? 0,
+    }))
   );
 });
 api.get('/costeo-estandar/:productoId', (req, res) => {
   const row = db.prepare('SELECT * FROM costeo_estandar WHERE producto_id = ?').get(req.params.productoId);
   if (!row) return res.status(404).json({ error: 'No hay ficha de costeo estandar para este producto' });
-  res.json({ ...row, costoUnitarioCalculado: costoUnitarioProducto(row.producto_id).costoUnitario });
+  res.json({
+    ...row,
+    costoUnitarioCalculado: costoUnitarioProducto(row.producto_id).costoUnitario,
+    costoInsumosPorPorcion: costoPorPorcionBOM(row.producto_id)?.costoPorPorcion ?? 0,
+  });
 });
-// Upsert: crea o actualiza la ficha del producto indicado en el body.
+// Upsert: crea o actualiza la ficha del producto indicado en el body. El costo
+// de insumos (masa + relleno) ya no se carga aqui: se toma automaticamente
+// del costo por porcion de la receta (Recetas/BOM) de ese producto.
 api.post('/costeo-estandar', (req, res) => {
   const f = req.body;
   if (!f.producto_id) return res.status(400).json({ error: 'producto_id es requerido' });
@@ -135,22 +155,22 @@ api.post('/costeo-estandar', (req, res) => {
   if (existente) {
     db.prepare(
       `UPDATE costeo_estandar SET porciones_por_lote=?, horas_armado=?, horas_masa=?, horas_relleno=?,
-       horas_empaquetado=?, personas=?, costo_hora_mano_obra=?, costo_insumos_masa=?, costo_insumos_relleno=?,
+       horas_empaquetado=?, personas=?, costo_hora_mano_obra=?,
        fecha_actualizacion=? WHERE producto_id=?`
     ).run(
       f.porciones_por_lote, f.horas_armado || 0, f.horas_masa || 0, f.horas_relleno || 0,
       f.horas_empaquetado || 0, f.personas || 1, f.costo_hora_mano_obra || 0,
-      f.costo_insumos_masa || 0, f.costo_insumos_relleno || 0, fecha, f.producto_id
+      fecha, f.producto_id
     );
   } else {
     db.prepare(
       `INSERT INTO costeo_estandar (producto_id, porciones_por_lote, horas_armado, horas_masa, horas_relleno,
-       horas_empaquetado, personas, costo_hora_mano_obra, costo_insumos_masa, costo_insumos_relleno, fecha_actualizacion)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+       horas_empaquetado, personas, costo_hora_mano_obra, fecha_actualizacion)
+       VALUES (?,?,?,?,?,?,?,?,?)`
     ).run(
       f.producto_id, f.porciones_por_lote, f.horas_armado || 0, f.horas_masa || 0, f.horas_relleno || 0,
       f.horas_empaquetado || 0, f.personas || 1, f.costo_hora_mano_obra || 0,
-      f.costo_insumos_masa || 0, f.costo_insumos_relleno || 0, fecha
+      fecha
     );
   }
   const row = db.prepare('SELECT * FROM costeo_estandar WHERE producto_id = ?').get(f.producto_id);

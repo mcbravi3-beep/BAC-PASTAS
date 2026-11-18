@@ -118,6 +118,7 @@ async function renderCrud(container, cfg) {
         if (f.step) input.step = f.step;
       }
       input.name = f.key;
+      if (f.required) input.required = true;
       if (editRow && editRow[f.key] !== undefined && editRow[f.key] !== null) input.value = editRow[f.key];
       wrap.appendChild(input);
       form.appendChild(wrap);
@@ -194,14 +195,17 @@ const sections = {
   clientes: {
     title: 'Clientes', api: 'clientes',
     fields: [
-      { key: 'nombre', label: 'Nombre' },
+      { key: 'nombre', label: 'Nombre', required: true },
+      { key: 'categoria', label: 'Categoria (precio)', type: 'options', options: ['minorista', 'mayorista'], required: true },
       { key: 'tipo', label: 'Tipo', type: 'options', options: ['particular', 'mayorista', 'revendedor'] },
       { key: 'contacto', label: 'Contacto' },
       { key: 'zona', label: 'Zona' },
       { key: 'email', label: 'Email', type: 'email' },
     ],
     columns: [
-      { key: 'codigo', label: 'Cod.' }, { key: 'nombre', label: 'Nombre' }, { key: 'tipo', label: 'Tipo' },
+      { key: 'codigo', label: 'Cod.' }, { key: 'nombre', label: 'Nombre' },
+      { label: 'Categoria', render: (r) => r.categoria === 'mayorista' ? '<span class="badge ok">Mayorista</span>' : '<span class="badge">Minorista</span>' },
+      { key: 'tipo', label: 'Tipo' },
       { key: 'contacto', label: 'Contacto' }, { key: 'zona', label: 'Zona' }, { key: 'email', label: 'Email' },
       { label: 'Total comprado', render: (r) => money(r.totalComprado) },
       { label: 'Saldo cta. cte.', render: (r) => r.saldoCuentaCorriente > 0 ? `<span class="badge warn">${money(r.saldoCuentaCorriente)}</span>` : money(r.saldoCuentaCorriente) },
@@ -236,7 +240,8 @@ const sections = {
       { key: 'nombre', label: 'Nombre (sabor)' },
       { key: 'categoria', label: 'Categoria' },
       { key: 'unidad_venta', label: 'Unidad de venta' },
-      { key: 'precio_venta', label: 'Precio venta', type: 'number', step: '0.01' },
+      { key: 'precio_venta_mayorista', label: 'Precio mayorista', type: 'number', step: '0.01' },
+      { key: 'precio_venta_minorista', label: 'Precio minorista', type: 'number', step: '0.01' },
       { key: 'stock_inicial', label: 'Stock inicial', type: 'number', step: '0.01' },
       { key: 'stock_minimo', label: 'Stock minimo', type: 'number', step: '0.01' },
     ],
@@ -244,8 +249,10 @@ const sections = {
       { key: 'codigo', label: 'Cod.' }, { key: 'categoria', label: 'Categoria' }, { key: 'nombre', label: 'Nombre' },
       { key: 'unidad_venta', label: 'Unidad venta' },
       { label: 'Costo unit.', render: (r) => r.origenCosteo === 'sin_datos' ? '<span class="note">sin costear</span>' : `${money(r.costoUnitario)} <span class="note">(${r.origenCosteo})</span>` },
-      { label: 'Precio venta', render: (r) => r.precio_venta > 0 ? money(r.precio_venta) : '<span class="note">sin definir</span>' },
-      { label: 'Margen', render: (r) => money(r.margen) },
+      { label: 'Precio mayorista', render: (r) => r.precio_venta_mayorista > 0 ? money(r.precio_venta_mayorista) : '<span class="note">sin definir</span>' },
+      { label: 'Precio minorista', render: (r) => r.precio_venta_minorista > 0 ? money(r.precio_venta_minorista) : '<span class="note">sin definir</span>' },
+      { label: 'Margen may.', render: (r) => money(r.margenMayorista) },
+      { label: 'Margen min.', render: (r) => money(r.margenMinorista) },
       { label: 'Stock', render: (r) => num(r.stockActual) },
       { label: 'Estado', render: (r) => r.alertaStock ? '<span class="badge warn">Bajo stock</span>' : '<span class="badge ok">OK</span>' },
     ],
@@ -410,15 +417,25 @@ async function renderVentas(container) {
           </label>
           <label>Fecha <input name="fecha" type="date" value="${todayISO()}"></label>
         </div>
-        <p class="note">Los productos sin precio de venta cargado no se pueden vender todavia: definir el precio desde la pantalla de Productos.</p>
+        <p class="note">Seleccioná primero el cliente: si tiene categoria mayorista o minorista, el precio se aplica solo. Si es consumidor final/ocasional, elegi el precio a mano en cada linea. Los productos sin ningun precio cargado no se pueden vender todavia: definirlos desde la pantalla de Productos.</p>
         <table class="ticket-form-table">
-          <thead><tr><th>Producto</th><th>Precio</th><th>Cantidad</th></tr></thead>
-          <tbody>${activos.map((p) => `
-            <tr${p.precio_venta > 0 ? '' : ' style="opacity:0.5"'}>
+          <thead><tr><th>Producto</th><th>Precios de referencia</th><th>Precio a aplicar</th><th>Cantidad</th></tr></thead>
+          <tbody>${activos.map((p) => {
+            const sinPrecios = !(p.precio_venta_mayorista > 0) && !(p.precio_venta_minorista > 0);
+            return `
+            <tr data-row-producto="${p.id}"${sinPrecios ? ' style="opacity:0.5"' : ''}>
               <td>${p.nombreCompleto}</td>
-              <td>${p.precio_venta > 0 ? money(p.precio_venta) : '<span class="note">sin precio</span>'}</td>
-              <td><input type="number" min="0" step="1" data-producto="${p.id}" data-precio="${p.precio_venta}" placeholder="0" style="width:80px" ${p.precio_venta > 0 ? '' : 'disabled title="Este producto todavia no tiene precio de venta cargado"'}></td>
-            </tr>`).join('')}
+              <td class="note">May: ${p.precio_venta_mayorista > 0 ? money(p.precio_venta_mayorista) : '-'}<br>Min: ${p.precio_venta_minorista > 0 ? money(p.precio_venta_minorista) : '-'}</td>
+              <td>
+                <span class="precio-auto note" hidden></span>
+                <select class="precio-manual" hidden>
+                  <option value="minorista">Minorista</option>
+                  <option value="mayorista">Mayorista</option>
+                </select>
+              </td>
+              <td><input type="number" min="0" step="1" data-producto="${p.id}" data-precio-mayorista="${p.precio_venta_mayorista}" data-precio-minorista="${p.precio_venta_minorista}" placeholder="0" style="width:80px" ${sinPrecios ? 'disabled title="Este producto todavia no tiene ningun precio de venta cargado"' : ''}></td>
+            </tr>`;
+          }).join('')}
           </tbody>
         </table>
         <div class="toolbar">
@@ -435,7 +452,8 @@ async function renderVentas(container) {
     const form = container.querySelector('#form-ticket');
     const tipoPagoSel = form.elements.tipo_pago;
     const formaPagoWrap = container.querySelector('#forma-pago-wrap');
-    const qtyInputs = [...form.querySelectorAll('input[data-producto]')];
+    const rowEls = [...form.querySelectorAll('tr[data-row-producto]')];
+    const qtyInputs = rowEls.map((tr) => tr.querySelector('input[data-producto]'));
     const totalPreview = container.querySelector('#ticket-total-preview');
 
     // Buscador predictivo de cliente: escribe cualquier parte del nombre,
@@ -455,6 +473,7 @@ async function renderVentas(container) {
     clienteInput.addEventListener('input', () => {
       clienteHidden.value = '';
       renderClienteOpciones(clienteInput.value);
+      actualizarModoPrecios();
     });
     clienteInput.addEventListener('blur', () => {
       setTimeout(() => { clienteLista.hidden = true; }, 150);
@@ -465,25 +484,62 @@ async function renderVentas(container) {
       clienteHidden.value = item.dataset.id;
       clienteInput.value = item.dataset.nombre;
       clienteLista.hidden = true;
+      actualizarModoPrecios();
     });
 
+    // Cliente mayorista o minorista -> precio automatico por linea. Sin
+    // cliente seleccionado (consumidor final/ocasional) -> el usuario elige
+    // el precio a mano en cada producto con el selector de la fila.
+    function clienteSeleccionado() {
+      const id = Number(clienteHidden.value) || null;
+      return id ? clientes.find((c) => c.id === id) : null;
+    }
+    function actualizarModoPrecios() {
+      const categoriaAuto = clienteSeleccionado()?.categoria || null;
+      rowEls.forEach((tr) => {
+        const autoSpan = tr.querySelector('.precio-auto');
+        const manualSel = tr.querySelector('.precio-manual');
+        if (categoriaAuto) {
+          autoSpan.hidden = false;
+          autoSpan.textContent = categoriaAuto === 'mayorista' ? 'Mayorista (auto)' : 'Minorista (auto)';
+          manualSel.hidden = true;
+        } else {
+          autoSpan.hidden = true;
+          manualSel.hidden = false;
+        }
+      });
+      updateTotal();
+    }
+    function precioEfectivo(tr) {
+      const categoria = clienteSeleccionado()?.categoria || tr.querySelector('.precio-manual').value;
+      const inp = tr.querySelector('input[data-producto]');
+      return categoria === 'mayorista' ? Number(inp.dataset.precioMayorista) : Number(inp.dataset.precioMinorista);
+    }
+
     function updateTotal() {
-      const total = qtyInputs.reduce((acc, inp) => acc + (Number(inp.value) || 0) * Number(inp.dataset.precio), 0);
+      const total = rowEls.reduce((acc, tr) => {
+        const inp = tr.querySelector('input[data-producto]');
+        return acc + (Number(inp.value) || 0) * precioEfectivo(tr);
+      }, 0);
       totalPreview.textContent = `Total: ${money(total)}`;
     }
     function syncTipoPago() {
       formaPagoWrap.style.display = tipoPagoSel.value === 'contado' ? '' : 'none';
     }
     qtyInputs.forEach((inp) => inp.addEventListener('input', updateTotal));
+    rowEls.forEach((tr) => tr.querySelector('.precio-manual').addEventListener('change', updateTotal));
     tipoPagoSel.onchange = syncTipoPago;
     syncTipoPago();
-    updateTotal();
+    actualizarModoPrecios();
 
     form.onsubmit = async (e) => {
       e.preventDefault();
-      const items = qtyInputs
-        .filter((inp) => Number(inp.value) > 0)
-        .map((inp) => ({ productoId: Number(inp.dataset.producto), cantidad: Number(inp.value) }));
+      const items = rowEls
+        .filter((tr) => Number(tr.querySelector('input[data-producto]').value) > 0)
+        .map((tr) => {
+          const inp = tr.querySelector('input[data-producto]');
+          return { productoId: Number(inp.dataset.producto), cantidad: Number(inp.value), precioUnitario: precioEfectivo(tr) };
+        });
       if (items.length === 0) {
         load(`<p class="result-msg error">Cargar la cantidad de al menos un producto.</p>`);
         return;
@@ -563,11 +619,12 @@ async function renderInventario(container) {
 // ---------- Costeo Estandar ----------
 async function renderCosteo(container) {
   const productos = await api.get('productos');
+  const productoPorId = new Map(productos.map((p) => [p.id, p]));
   async function load(msgHtml = '') {
     const fichas = await api.get('costeo-estandar');
     container.innerHTML = `
       <h2>Costeo Estandar</h2>
-      <p class="note">Ficha de costo por lote de produccion. Costo unitario = (insumos masa + insumos relleno + mano de obra) / porciones por lote. Mano de obra = (horas armado + masa + relleno + empaquetado) x personas x costo hora.</p>
+      <p class="note">Ficha de costo por lote de produccion. El costo de insumos (masa + relleno) ya no se carga a mano: se toma automaticamente del costo por porcion cargado en Recetas (BOM). Costo unitario = costo de insumos por porcion + (mano de obra del lote / porciones por lote). Mano de obra = (horas armado + masa + relleno + empaquetado) x personas x costo hora.</p>
       <form class="inline-form" id="form-costeo">
         <label>Producto <select name="producto_id">${productos.map((p) => `<option value="${p.id}">${p.nombreCompleto}</option>`).join('')}</select></label>
         <label>Porciones por lote <input name="porciones_por_lote" type="number" step="0.01" required></label>
@@ -577,17 +634,17 @@ async function renderCosteo(container) {
         <label>Horas empaquetado <input name="horas_empaquetado" type="number" step="0.01"></label>
         <label>Personas <input name="personas" type="number" step="0.01" value="1"></label>
         <label>Costo hora M.O. <input name="costo_hora_mano_obra" type="number" step="0.01"></label>
-        <label>Costo insumos masa <input name="costo_insumos_masa" type="number" step="0.01"></label>
-        <label>Costo insumos relleno <input name="costo_insumos_relleno" type="number" step="0.01"></label>
+        <label>Costo insumos por porcion (automatico) <input id="costo-insumos-auto" type="text" disabled style="width:140px"></label>
         <button type="submit">Guardar ficha</button>
         <span class="note" id="costeo-autoguardado"></span>
       </form>
+      <p class="note">El costo de insumos por porcion se carga y actualiza desde <strong>Recetas (BOM)</strong> (insumos de la receta + cantidad de porciones que rinde).</p>
       <div id="costeo-msg">${msgHtml}</div>
-      <table><thead><tr><th>Producto</th><th>Porciones</th><th>Costo M.O.</th><th>Costo insumos</th><th>Costo unitario</th><th>Actualizado</th><th></th></tr></thead>
+      <table><thead><tr><th>Producto</th><th>Porciones</th><th>Costo M.O.</th><th>Costo insumos (de Recetas)</th><th>Costo unitario</th><th>Actualizado</th><th></th></tr></thead>
       <tbody>${fichas.map((r) => `<tr>
         <td>${r.producto_nombre}</td><td>${num(r.porciones_por_lote)}</td>
         <td>${money((r.horas_armado + r.horas_masa + r.horas_relleno + r.horas_empaquetado) * r.personas * r.costo_hora_mano_obra)}</td>
-        <td>${money(r.costo_insumos_masa + r.costo_insumos_relleno)}</td>
+        <td>${money(r.costoInsumosPorPorcion)}</td>
         <td>${money(r.costoUnitarioCalculado)}</td>
         <td>${r.fecha_actualizacion || ''}</td>
         <td><button class="danger" data-del="${r.producto_id}">Eliminar</button></td>
@@ -595,6 +652,13 @@ async function renderCosteo(container) {
     `;
     const formCosteo = container.querySelector('#form-costeo');
     const autoguardadoMsg = container.querySelector('#costeo-autoguardado');
+    const costoInsumosAuto = container.querySelector('#costo-insumos-auto');
+    function actualizarCostoInsumosAuto() {
+      const producto = productoPorId.get(Number(formCosteo.elements.producto_id.value));
+      costoInsumosAuto.value = money(producto?.costoInsumosPorPorcion ?? 0);
+    }
+    formCosteo.elements.producto_id.addEventListener('change', actualizarCostoInsumosAuto);
+    actualizarCostoInsumosAuto();
     function datosFormulario() {
       const data = {};
       for (const el of formCosteo.elements) if (el.name) data[el.name] = el.type === 'number' ? Number(el.value || 0) : el.value;
@@ -719,10 +783,13 @@ async function renderRecetas(container) {
       return { ...r, insumo, unidadReceta, requeridoEnUnidadStock, comparable, alcanza };
     });
     const faltantes = filasConStock.filter((f) => f.comparable && !f.alcanza);
+    const costoTotalIngredientes = filasConStock.reduce((acc, r) => acc + r.cantidad_por_unidad * r.insumo_costo, 0);
+    const porcionesActual = productoActual?.porciones_receta > 0 ? productoActual.porciones_receta : 1;
+    const costoPorPorcion = costoTotalIngredientes / porcionesActual;
 
     container.innerHTML = `
       <h2>Recetas (BOM)</h2>
-      <p class="note">Receta insumo por insumo. Se usa para descontar stock en cada produccion, y como metodo de costeo de respaldo cuando el producto no tiene ficha de Costeo Estandar.</p>
+      <p class="note">Receta insumo por insumo. Se usa para descontar stock en cada produccion, y como metodo de costeo (costo de insumos por porcion, que Costeo Estandar toma automaticamente).</p>
       <div class="toolbar">
         <label>Producto: <select id="prod-sel">${productos.map((p) => `<option value="${p.id}" ${p.id === productoId ? 'selected' : ''}>${p.nombreCompleto}</option>`).join('')}</select></label>
         <button type="button" class="secondary" id="btn-replicar" ${rows.length === 0 ? 'disabled' : ''}>Replicar insumos en otros productos</button>
@@ -731,6 +798,17 @@ async function renderRecetas(container) {
         ? `<div class="alert-box warn">⚠️ <strong>Stock insuficiente:</strong> no alcanza para preparar esta receta con ${faltantes.length} de sus insumos. Hace clic en "No alcanza" en la tabla para ver el detalle.</div>`
         : `<div class="alert-box ok">✅ Stock suficiente para preparar esta receta con los insumos disponibles.</div>`}
       <div id="receta-msg">${msgHtml}</div>
+
+      <div class="card">
+        <h3>Rendimiento y costo por porcion</h3>
+        <div class="toolbar">
+          <label>Cantidad de porciones que rinde esta receta <input type="number" id="porciones-receta" min="0.01" step="0.01" value="${porcionesActual}" style="width:100px"></label>
+          <button type="button" id="btn-guardar-porciones">Guardar</button>
+          <span id="porciones-msg" class="note"></span>
+        </div>
+        <p class="note">Costo total de insumos de la receta: ${money(costoTotalIngredientes)} — Costo de insumos por porcion: <strong>${money(costoPorPorcion)}</strong>. Este costo por porcion es el que usa Costeo Estandar como costo base de insumos (masa + relleno).</p>
+      </div>
+
       <form class="inline-form" id="form-receta">
         <label>Insumo <select name="insumo_id">${insumos.map((i) => `<option value="${i.id}">${i.nombre} (stock en ${i.unidad})</option>`).join('')}</select></label>
         <label>Cantidad por unidad <input name="cantidad_por_unidad" type="number" step="0.0001" required></label>
@@ -757,6 +835,17 @@ async function renderRecetas(container) {
     `;
     container.querySelector('#prod-sel').onchange = (e) => { productoId = Number(e.target.value); load(); };
     container.querySelector('#btn-replicar').onclick = () => abrirModalReplicar(rows, productoActual);
+    container.querySelector('#btn-guardar-porciones').onclick = async () => {
+      const valor = Number(container.querySelector('#porciones-receta').value);
+      const msgSpan = container.querySelector('#porciones-msg');
+      if (!(valor > 0)) { msgSpan.textContent = '❌ Las porciones deben ser mayores a 0'; return; }
+      try {
+        await api.put(`productos/${productoId}`, { porciones_receta: valor });
+        load(`<p class="result-msg ok">✅ Porciones actualizadas.</p>`);
+      } catch (err) {
+        msgSpan.textContent = '❌ ' + err.message;
+      }
+    };
     container.querySelector('#form-receta').onsubmit = async (e) => {
       e.preventDefault();
       const f = e.target;

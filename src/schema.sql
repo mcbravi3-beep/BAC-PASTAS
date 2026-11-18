@@ -26,13 +26,22 @@ CREATE TABLE IF NOT EXISTS productos (
   nombre TEXT NOT NULL,
   categoria TEXT,
   unidad_venta TEXT,
-  precio_venta REAL NOT NULL DEFAULT 0,
+  precio_venta_mayorista REAL NOT NULL DEFAULT 0,
+  precio_venta_minorista REAL NOT NULL DEFAULT 0,
   stock_inicial REAL NOT NULL DEFAULT 0,
   stock_minimo REAL NOT NULL DEFAULT 0,
   activo INTEGER NOT NULL DEFAULT 1,
-  notas_receta TEXT
+  notas_receta TEXT,
+  -- Cantidad de porciones que rinde la receta (Recetas/BOM) de este producto;
+  -- se usa para sacar el costo de insumos por porcion (costo total de la
+  -- receta / porciones_receta). Default 1 para no romper productos viejos.
+  porciones_receta REAL NOT NULL DEFAULT 1
 );
 
+-- El costo de insumos (masa + relleno) ya NO se carga a mano aqui: se toma
+-- automaticamente del costo por porcion calculado en Recetas (BOM). Esta
+-- ficha solo cubre el costo de mano de obra, que se sigue dividiendo por
+-- porciones_por_lote.
 CREATE TABLE IF NOT EXISTS costeo_estandar (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   producto_id INTEGER NOT NULL UNIQUE REFERENCES productos(id) ON DELETE CASCADE,
@@ -43,8 +52,6 @@ CREATE TABLE IF NOT EXISTS costeo_estandar (
   horas_empaquetado REAL NOT NULL DEFAULT 0,
   personas REAL NOT NULL DEFAULT 1,
   costo_hora_mano_obra REAL NOT NULL DEFAULT 0,
-  costo_insumos_masa REAL NOT NULL DEFAULT 0,
-  costo_insumos_relleno REAL NOT NULL DEFAULT 0,
   fecha_actualizacion TEXT
 );
 
@@ -63,7 +70,10 @@ CREATE TABLE IF NOT EXISTS clientes (
   tipo TEXT NOT NULL DEFAULT 'particular' CHECK (tipo IN ('particular','mayorista','revendedor')),
   contacto TEXT,
   zona TEXT,
-  email TEXT
+  email TEXT,
+  -- Categoria obligatoria usada para asignar automaticamente el precio
+  -- (mayorista o minorista) al facturar en Ventas.
+  categoria TEXT NOT NULL DEFAULT 'minorista' CHECK (categoria IN ('mayorista','minorista'))
 );
 
 -- Un ticket agrupa una o mas lineas de venta (Ventas) emitidas juntas.

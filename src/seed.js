@@ -64,49 +64,52 @@ export function seed() {
   }
 
   // --- Productos: catalogo real de 23 items ---
-  // [codigo, categoria, nombre (sabor/variedad), unidad_venta, precio_venta]
+  // [codigo, categoria, nombre (sabor/variedad), unidad_venta, precio mayorista, precio minorista]
   const productosData = [
-    ['P001', 'Ravioles', 'Verdura y carne', 'Porcion', 2900],
-    ['P002', 'Ravioles', 'Ricota y espinaca', 'Bandeja 1kg', 0],
-    ['P003', 'Ravioles', '4 quesos', 'Bandeja 1kg', 0],
-    ['P004', 'Ravioles', 'Pollo y queso azul', 'Bandeja 1kg', 0],
-    ['P005', 'Sorrentinos', 'Jamon y queso', 'Bandeja 1kg', 6500],
-    ['P006', 'Sorrentinos', '4 quesos', 'Bandeja 1kg', 0],
-    ['P007', 'Sorrentinos', 'Calabaza', 'Bandeja 1kg', 0],
-    ['P008', 'Sorrentinos', 'Vacio al vino tinto', 'Bandeja 1kg', 0],
-    ['P009', 'Sorrentinos', 'Salmon rosado', 'Bandeja 1kg', 0],
-    ['P010', 'Canelones', 'Carne y verdura', 'Bandeja x6', 0],
-    ['P011', 'Canelones', 'Choclo y queso', 'Bandeja x6', 0],
-    ['P012', 'Canelones', 'Espinaca y queso', 'Bandeja x6', 0],
-    ['P013', 'Agnolotti', 'Pollo y puerro', 'Bandeja 1kg', 0],
-    ['P014', 'Agnolotti', 'Osobuco braseado', 'Bandeja 1kg', 0],
-    ['P015', 'Raviolon', 'Carne y verdura', 'Unidad', 0],
-    ['P016', 'Noquis', 'Papa', 'Paquete 500g', 0],
-    ['P017', 'Noquis', 'Espinaca', 'Paquete 500g', 0],
-    ['P018', 'Noquis', 'Rellenos (queso y papa)', 'Paquete 500g', 0],
-    ['P019', 'Fideos', 'Espinaca', 'Paquete 500g', 0],
-    ['P020', 'Fideos', 'Huevo', 'Paquete 500g', 0],
-    ['P021', 'Fideos', 'Morron', 'Paquete 500g', 0],
-    ['P022', 'Lasagna', 'Lasagna', 'Bandeja 1kg', 0],
-    ['P023', 'Salsa Bolognesa', 'Salsa Bolognesa', 'Frasco 500g', 0],
+    ['P001', 'Ravioles', 'Verdura y carne', 'Porcion', 2600, 2900],
+    ['P002', 'Ravioles', 'Ricota y espinaca', 'Bandeja 1kg', 0, 0],
+    ['P003', 'Ravioles', '4 quesos', 'Bandeja 1kg', 0, 0],
+    ['P004', 'Ravioles', 'Pollo y queso azul', 'Bandeja 1kg', 0, 0],
+    ['P005', 'Sorrentinos', 'Jamon y queso', 'Bandeja 1kg', 5800, 6500],
+    ['P006', 'Sorrentinos', '4 quesos', 'Bandeja 1kg', 0, 0],
+    ['P007', 'Sorrentinos', 'Calabaza', 'Bandeja 1kg', 0, 0],
+    ['P008', 'Sorrentinos', 'Vacio al vino tinto', 'Bandeja 1kg', 0, 0],
+    ['P009', 'Sorrentinos', 'Salmon rosado', 'Bandeja 1kg', 0, 0],
+    ['P010', 'Canelones', 'Carne y verdura', 'Bandeja x6', 0, 0],
+    ['P011', 'Canelones', 'Choclo y queso', 'Bandeja x6', 0, 0],
+    ['P012', 'Canelones', 'Espinaca y queso', 'Bandeja x6', 0, 0],
+    ['P013', 'Agnolotti', 'Pollo y puerro', 'Bandeja 1kg', 0, 0],
+    ['P014', 'Agnolotti', 'Osobuco braseado', 'Bandeja 1kg', 0, 0],
+    ['P015', 'Raviolon', 'Carne y verdura', 'Unidad', 0, 0],
+    ['P016', 'Noquis', 'Papa', 'Paquete 500g', 0, 0],
+    ['P017', 'Noquis', 'Espinaca', 'Paquete 500g', 0, 0],
+    ['P018', 'Noquis', 'Rellenos (queso y papa)', 'Paquete 500g', 0, 0],
+    ['P019', 'Fideos', 'Espinaca', 'Paquete 500g', 0, 0],
+    ['P020', 'Fideos', 'Huevo', 'Paquete 500g', 0, 0],
+    ['P021', 'Fideos', 'Morron', 'Paquete 500g', 0, 0],
+    ['P022', 'Lasagna', 'Lasagna', 'Bandeja 1kg', 0, 0],
+    ['P023', 'Salsa Bolognesa', 'Salsa Bolognesa', 'Frasco 500g', 0, 0],
   ];
   const productoIds = {};
   const insProducto = db.prepare(
-    'INSERT INTO productos (codigo, categoria, nombre, unidad_venta, precio_venta, stock_inicial, stock_minimo, activo) VALUES (?,?,?,?,?,0,0,1)'
+    'INSERT INTO productos (codigo, categoria, nombre, unidad_venta, precio_venta_mayorista, precio_venta_minorista, stock_inicial, stock_minimo, activo) VALUES (?,?,?,?,?,?,0,0,1)'
   );
-  for (const [codigo, categoria, nombre, unidadVenta, precio] of productosData) {
-    const info = insProducto.run(codigo, categoria, nombre, unidadVenta, precio);
+  for (const [codigo, categoria, nombre, unidadVenta, precioMayorista, precioMinorista] of productosData) {
+    const info = insProducto.run(codigo, categoria, nombre, unidadVenta, precioMayorista, precioMinorista);
     productoIds[codigo] = Number(info.lastInsertRowid);
   }
 
   // --- Costeo_Estandar: ficha REAL de "Ravioles - Verdura y carne" (P001) ---
-  // Dato real aportado por el negocio (asi calcula Meri su costo real).
+  // Dato real aportado por el negocio (asi calcula Meri su costo real). El
+  // costo de insumos ya no se carga aqui: sale solo de la receta (BOM) de
+  // P001 cargada mas abajo, dividida por productos.porciones_receta.
   db.prepare(
     `INSERT INTO costeo_estandar
       (producto_id, porciones_por_lote, personas, horas_armado, horas_masa, horas_relleno, horas_empaquetado,
-       costo_hora_mano_obra, costo_insumos_masa, costo_insumos_relleno, fecha_actualizacion)
-     VALUES (?, 100, 2, 1.5, 0.333333333333333, 2, 1, 7000, 12000, 95000, '2026-09-01')`
+       costo_hora_mano_obra, fecha_actualizacion)
+     VALUES (?, 100, 2, 1.5, 0.333333333333333, 2, 1, 7000, '2026-09-01')`
   ).run(productoIds['P001']);
+  db.prepare('UPDATE productos SET porciones_receta = 12 WHERE codigo IN (?, ?)').run('P001', 'P005');
 
   // --- Recetas_BOM: cargadas en el Excel para P001 y P005 ---
   const insReceta = db.prepare(
@@ -133,16 +136,17 @@ export function seed() {
   ]);
 
   // --- Clientes ---
+  // [codigo, nombre, tipo, categoria (mayorista/minorista -- define el precio automatico en Ventas), contacto, zona]
   const clientesData = [
-    ['C001', 'Juan Perez', 'particular', '011-5555-0001', 'Almagro'],
-    ['C002', 'Almacen Don Jose', 'mayorista', '011-5555-0002', 'Caballito'],
-    ['C003', 'Verduleria La Esquina', 'revendedor', '011-5555-0003', 'Flores'],
-    ['C004', 'Maria Gonzalez', 'particular', '011-5555-0004', 'Boedo'],
+    ['C001', 'Juan Perez', 'particular', 'minorista', '011-5555-0001', 'Almagro'],
+    ['C002', 'Almacen Don Jose', 'mayorista', 'mayorista', '011-5555-0002', 'Caballito'],
+    ['C003', 'Verduleria La Esquina', 'revendedor', 'mayorista', '011-5555-0003', 'Flores'],
+    ['C004', 'Maria Gonzalez', 'particular', 'minorista', '011-5555-0004', 'Boedo'],
   ];
   const clienteIds = {};
-  const insCliente = db.prepare('INSERT INTO clientes (codigo, nombre, tipo, contacto, zona) VALUES (?,?,?,?,?)');
-  for (const [codigo, nombre, tipo, contacto, zona] of clientesData) {
-    const info = insCliente.run(codigo, nombre, tipo, contacto, zona);
+  const insCliente = db.prepare('INSERT INTO clientes (codigo, nombre, tipo, categoria, contacto, zona) VALUES (?,?,?,?,?,?)');
+  for (const [codigo, nombre, tipo, categoria, contacto, zona] of clientesData) {
+    const info = insCliente.run(codigo, nombre, tipo, categoria, contacto, zona);
     clienteIds[codigo] = Number(info.lastInsertRowid);
   }
 
